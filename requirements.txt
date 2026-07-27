@@ -1,0 +1,16 @@
+# Sparse+Robust Portfolio Optimization (VN100) — dependencies
+# Python 3.10+ (dev/test trên 3.14). Cài: pip install -r requirements.txt
+# Lưu ý: cvxpy/nbconvert chỉ cần cho verify (Phase 4) và notebook (Phase 6).
+
+vnstock>=4.0.5
+vnai>=2.5.4
+numpy>=2.2.6
+pandas>=2.3.3
+pyarrow>=25.0.0
+python-dotenv>=1.2.2
+matplotlib>=3.11.1
+cvxpy>=1.9.2
+pytest>=9.1.1
+nbconvert>=7.17.1
+nbformat>=5.10.4
+ipykernel>=7.3.0
