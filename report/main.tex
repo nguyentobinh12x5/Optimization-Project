@@ -1,0 +1,101 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage[numbers]{natbib}
+\usepackage{hyperref}
+\usepackage{cleveref}
+
+\graphicspath{{figures/}}
+
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,
+            urlcolor=blue!50!black}
+
+\newtheorem{proposition}{Proposition}
+
+% Shorthands used throughout the report.
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\muhat}{\hat{\mu}}
+\newcommand{\Sig}{\Sigma}
+\newcommand{\Ssqrt}{\Sigma^{1/2}}
+\newcommand{\one}{\mathbf{1}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\prox}{\operatorname{prox}}
+\newcommand{\softt}{\mathcal{S}}
+
+% Listing style for the appendix code. `listings`, NOT `minted` -- minted needs
+% -shell-escape, which is extra configuration on Overleaf.
+\definecolor{codegray}{gray}{0.4}
+\definecolor{codegreen}{rgb}{0.0,0.45,0.0}
+\definecolor{codeblue}{rgb}{0.0,0.0,0.6}
+\lstdefinestyle{pythoncode}{
+  language=Python,
+  basicstyle=\ttfamily\scriptsize,
+  commentstyle=\color{codegreen}\itshape,
+  keywordstyle=\color{codeblue}\bfseries,
+  stringstyle=\color{codegray},
+  numbers=left, numberstyle=\tiny\color{codegray}, numbersep=6pt,
+  breaklines=true, breakatwhitespace=false,
+  showstringspaces=false,
+  frame=single, rulecolor=\color{codegray},
+  tabsize=4, captionpos=b,
+  upquote=true,
+}
+\lstset{style=pythoncode}
+
+\begin{document}
+
+% The page counter is reset after the title page (see below), which would make
+% hyperref emit two anchors named "page.1". Suppressing anchors on the title
+% page avoids that duplicate without affecting any link in the document.
+\hypersetup{pageanchor=false}
+\begin{titlepage}
+\centering
+\vspace*{2cm}
+{\LARGE\bfseries Sparse and Robust Mean--Variance\\[0.3em]
+Portfolio Optimization on the VN100 Universe\par}
+\vspace{0.8cm}
+{\large A hand-written proximal-subgradient method,\\
+cross-verified against an interior-point solver\par}
+\vspace{2.5cm}
+{\large\bfseries Nguyen To Binh\par}
+{\large Student ID: 1010051\par}
+\vspace{0.4cm}
+{\large Individual project\par}
+\vspace{2.5cm}
+{\large TODO: Course name and code\par}
+\vspace{0.3cm}
+{\large TODO: Instructor name\par}
+\vfill
+{\large \today\par}
+\end{titlepage}
+
+% Reset the page counter so that Section 1 begins on page 1. This makes the
+% number recorded at \label{sec:endofbody} equal to the main-body page count,
+% which is the quantity the 10-page limit applies to.
+\setcounter{page}{1}
+\hypersetup{pageanchor=true}
+
+\input{sections/01-problem-identification}
+\input{sections/02-problem-modeling}
+\input{sections/03-model-correctness}
+\input{sections/04-solution-method}
+\input{sections/05-data}
+\input{sections/06-results-insample}
+\input{sections/07-backtest}
+\input{sections/08-conclusion}
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\appendix
+\input{sections/99-appendix}
+
+\end{document}
