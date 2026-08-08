@@ -1,1 +1,52 @@
 \section{Problem Identification}\label{sec:identification}
+
+An investor has one unit of capital and must decide how to divide it among the stocks of the
+VN100 basket, the index of the hundred largest and most actively traded companies listed in
+Vietnam. Ninety-eight of those tickers survive the data cleaning described in
+\cref{sec:data}, and the decision is informed by four years of daily closing prices. The
+question is simply: what fraction of the capital should go into each stock?
+
+The textbook answer is Markowitz mean--variance analysis \citep{markowitz1952}: estimate each
+stock's average return and the covariance between stocks, then trade expected return off
+against portfolio variance. In practice that answer is incomplete for three reasons, and each
+one motivates a term in the model built in \cref{sec:modeling}.
+
+\paragraph{The inputs are estimates, and the mean is a bad one.}
+An average return computed from a few years of daily data is a noisy quantity. An optimizer
+handed such an estimate will happily concentrate capital in whichever stocks happened to drift
+upward during the sample, because it has no way to distinguish a genuine tendency from an
+accident of the period. The resulting portfolio is optimal for the past and arbitrary for the
+future. This is not a hypothetical concern: it is the standard explanation for why optimized
+portfolios so often fail to beat a naive equal-weight benchmark out of sample
+\citep{demiguel2009}. A useful model should therefore ask not only ``what is best if the
+estimate is right?'' but ``what is still acceptable if the estimate is somewhat wrong?''
+
+\paragraph{Holding ninety-eight stocks is expensive.}
+A mathematically optimal portfolio typically assigns a nonzero weight to every available
+asset, including weights of a fraction of a percent. Each of those positions has to be bought,
+rebalanced, monitored, and eventually sold, and each transaction costs money. An investor
+generally prefers a portfolio of ten or twenty names to one of ninety-eight, even at a small
+cost in theoretical optimality, and that preference is an objective worth encoding rather than
+an inconvenience to be ignored.
+
+\paragraph{Risk still matters.}
+Variance of the realized portfolio return remains a real concern, and the classical quadratic
+penalty remains the natural way to express it.
+
+\medskip
+
+The goal of this project is therefore to find portfolio weights that balance four competing
+objectives at once --- expected return, variance, sensitivity to a mis-estimated mean, and the
+number of positions actually held --- and to do so with an optimization algorithm written from
+scratch rather than delegated to an off-the-shelf solver, so that the optimization machinery is
+the object of study rather than a black box.
+
+The remainder of the report follows the structure of the problem.
+\Cref{sec:modeling} states the model formally and classifies it.
+\Cref{sec:correctness} argues that the model faithfully represents the informal problem above.
+\Cref{sec:method} derives and presents the solution algorithm.
+\Cref{sec:data} describes the data.
+\Cref{sec:insample} reports in-sample results and verifies the hand-written solver against an
+independent one.
+\Cref{sec:backtest} tests the strategy out of sample against an equal-weight benchmark, and
+\cref{sec:conclusion} discusses efficiency, solution quality, and limitations.

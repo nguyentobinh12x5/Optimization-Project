@@ -1,1 +1,125 @@
 \section{Problem Modeling}\label{sec:modeling}
+
+\subsection{Decision Variable and Constants}
+
+The \textbf{decision variable} is the weight vector $w \in \R^{N}$ with $N = 98$, where $w_i$
+is the fraction of total capital allocated to stock $i$. A negative $w_i$ denotes a short
+position.
+
+The \textbf{constants} are the statistical inputs, all estimated from historical data before
+the optimization runs and held fixed while it does:
+\begin{itemize}
+  \item $\muhat \in \R^{N}$, the sample mean of daily returns;
+  \item $\Sig \in \mathbb{S}^{N}_{+}$, the sample covariance matrix of daily returns;
+  \item $\Ssqrt$, the symmetric positive-semidefinite square root of $\Sig$, so that
+        $\Ssqrt\Ssqrt = \Sig$.
+\end{itemize}
+
+The three scalars $\kappa, \gamma, \lambda \ge 0$ are \textbf{hyperparameters, not decision
+variables}. The optimizer treats them as fixed constants; they are chosen by the modeller when
+exploring the solution family (\cref{sec:insample}) or by validation on held-out data
+(\cref{sec:backtest}).
+
+All quantities are in \textbf{daily} return units. No annualization occurs inside the
+optimizer; annualized figures appear only in the performance table of \cref{sec:backtest}.
+
+\subsection{Objective Function}
+
+The optimization problem is
+\begin{equation}\label{eq:main}
+\min_{w \in \R^{N}} \quad
+  \underbrace{-\muhat^\top w}_{\text{expected return}}
+  \;+\; \underbrace{\kappa \norm{\Ssqrt w}_2}_{\text{robustness}}
+  \;+\; \underbrace{\gamma\, w^\top \Sig w}_{\text{variance}}
+  \;+\; \underbrace{\lambda \norm{w}_1}_{\text{sparsity}}
+\qquad \text{s.t.} \quad \one^\top w = 1 .
+\end{equation}
+
+\begin{table}[htbp]
+\centering
+\caption{The role of each term in \cref{eq:main}. The four terms correspond one-to-one with
+the four competing objectives identified in \cref{sec:identification}.}
+\label{tab:terms}
+\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Term} & \textbf{Role} \\
+\midrule
+$-\muhat^\top w$
+  & Minimizing the negative expected return is maximizing expected return. \\[2pt]
+$\kappa \norm{\Ssqrt w}_2$
+  & Worst-case adjustment for uncertainty in $\muhat$; $\kappa$ sets how cautious. \\
+  & Derived rather than assumed in \cref{sec:correctness}. \\[2pt]
+$\gamma\, w^\top \Sig w$
+  & Portfolio variance; $\gamma$ is the risk-aversion coefficient. \\[2pt]
+$\lambda \norm{w}_1$
+  & Convex surrogate for the number of holdings; also caps gross leverage. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Constraints}
+
+The single explicit constraint is the \textbf{budget constraint} $\one^\top w = 1$: the
+portfolio is fully invested, with no idle cash and no borrowing beyond what a short position
+implies.
+
+\textbf{There is no constraint $w \ge 0$ in \cref{eq:main}.} Short selling is permitted. This
+is a deliberate modelling decision made at the outset, not an omission, and it should be kept
+in mind when reading \cref{sec:insample}: a reader who assumes a long-only portfolio will
+misinterpret every weight vector reported there. \Cref{sec:backtest} does add $w \ge 0$ for the
+deployed strategy, and explains at that point why the out-of-sample study is long-only while
+the in-sample study is not.
+
+\subsection{Type of Optimization Problem}
+
+Problem \cref{eq:main} is \textbf{convex, nondifferentiable, and second-order-cone
+representable}. The convexity argument is given in \cref{sec:correctness}; the conic
+representability is established by exhibiting the epigraph reformulation
+\begin{equation}\label{eq:socp}
+\begin{aligned}
+\min_{w,\,t,\,s,\,u} \quad & -\muhat^\top w + \kappa t + \gamma s + \lambda \one^\top u \\
+\text{s.t.} \quad
+  & \norm{\Ssqrt w}_2 \le t, \\
+  & \norm{\Ssqrt w}_2^2 \le s, \\
+  & -u_i \le w_i \le u_i, \quad i = 1,\dots,N, \\
+  & \one^\top w = 1 .
+\end{aligned}
+\end{equation}
+The first constraint is a second-order cone constraint on $(\Ssqrt w, t)$ directly. The second
+is a rotated second-order cone constraint, using the identity
+$w^\top \Sig w = w^\top \Ssqrt \Ssqrt w = \norm{\Ssqrt w}_2^2$. The third is the standard
+linear splitting of the $\ell_1$ norm, which is tight at the optimum because $\lambda \ge 0$
+pushes each $u_i$ down to $|w_i|$. The fourth is affine. Every constraint is thus affine or
+conic, and the objective is linear in the lifted variables $(w,t,s,u)$, so \cref{eq:main} is a
+second-order cone program. This is what makes it legitimate to hand the same problem to an
+interior-point conic solver in \cref{sec:insample} and treat that solver's answer as
+independent ground truth.
+
+Nondifferentiability is the property that shapes the algorithm. Two of the four terms are
+nonsmooth: $\kappa\norm{\Ssqrt w}_2$ fails to be differentiable wherever $\Ssqrt w = 0$, and
+$\lambda\norm{w}_1$ fails to be differentiable at every point where some coordinate $w_i$ is
+zero --- which, for a penalty whose entire purpose is to drive coordinates to zero, is exactly
+where the solution lives. Plain gradient descent therefore does not apply, and
+\cref{sec:method} builds a proximal-subgradient method instead.
+
+\subsection{Modeling Assumptions}
+
+The model rests on the following assumptions, stated as assumptions rather than facts:
+
+\begin{enumerate}
+  \item Daily returns are drawn from a distribution whose first two moments are stable across
+        the estimation window, so that a sample mean and sample covariance are meaningful
+        inputs to a forward-looking decision.
+  \item The historical estimates $\muhat$ and $\Sig$ are the relevant inputs; the model
+        contains no separate forecasting layer.
+  \item Capital is perfectly divisible, so fractional share quantities are permitted.
+  \item There are no position limits, sector limits, or liquidity limits beyond the budget
+        constraint.
+  \item Transaction costs are \emph{absent} from \cref{eq:main}. They are reintroduced only in
+        the backtest of \cref{sec:backtest}, at $0.20\%$ of turnover per rebalance.
+  \item Short positions, where they occur, are assumed executable without borrowing cost, and
+        portfolio weights are assumed re-set at each evaluation point rather than allowed to
+        drift --- except in \cref{sec:backtest}, where both drift between rebalances and the
+        cost of correcting it are modelled explicitly.
+\end{enumerate}
