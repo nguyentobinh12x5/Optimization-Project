@@ -1,2 +1,75 @@
 \section{Discussion, Limitations, and Conclusion}\label{sec:conclusion}
+
+\subsection{Computational efficiency}
+
+Across the verification grid the hand-written solver required between \textbf{222 and 2113}
+iterations. Per-iteration cost is dominated by a single matrix--vector product $\Sig w$ at
+$O(N^2)$, plus the bisection of \cref{prop:jointprox} at $O(N \log(1/\epsilon))$; no matrix
+factorization occurs anywhere inside the loop, and memory traffic is one $N \times N$ read per
+iteration.
+
+The contrast with the interior-point method is the expected one in kind: CLARABEL converges in
+a few dozen iterations rather than hundreds, but each iteration forms and factorizes a KKT
+system at roughly $O(N^3)$. It would be convenient to conclude that the first-order method
+therefore wins, and the data does not support that. At $N = 98$ a dense $98 \times 98$
+factorization is trivial for a modern machine, the interior-point solver is entirely practical,
+and neither method is anywhere near a wall-clock bottleneck. The first-order method's advantage
+here is that it is transparent and was built from the problem structure rather than invoked;
+its asymptotic advantage would become a real one only at $N$ in the thousands, where
+factorization cost dominates and the $O(N^2)$ per-iteration profile starts to matter.
+
+\subsection{Solution quality}
+
+The solver produces exact zeros rather than thresholded small values, satisfies the budget
+constraint to $10^{-12}$, matches an independently implemented interior-point solver to a
+maximum relative objective gap of $7.75 \times 10^{-6}$, and reproduces its active set exactly
+on every parameter set tested (\cref{tab:cvxpy}). For a convex problem with a unique optimal
+value, that combination is strong evidence of correctness.
+
+\subsection{Limitations}
+
+\begin{itemize}
+  \item \textbf{Survivorship bias.} The current VN100 membership is applied backward over four
+        years, so delisted and removed tickers are absent from the universe.
+  \item \textbf{$\muhat$ remains a poor estimator.} The sample mean has high variance over a
+        short window. The robust term blunts the consequences of this; it does not remove them,
+        and no term in \cref{eq:main} can.
+  \item \textbf{The $\kappa$ finding is empirical.} The increase in concentration reported in
+        \cref{sec:insample} is an observation on one covariance structure with a plausible
+        mechanism, not a general result.
+  \item \textbf{The out-of-sample window is short.} Roughly 24 months spanning a single market
+        regime. The conclusions of \cref{sec:backtest} cannot be extrapolated to other cycles.
+  \item \textbf{Validation overfitting.} Selecting $(\kappa,\gamma)$ on a six-month window is a
+        mild form of fitting to the validation set, inherent to short-window walk-forward
+        rather than a defect of this implementation --- and, as \cref{sec:backtest} shows, it
+        is the direct cause of the turnover that drives the cost disadvantage.
+  \item \textbf{A single historical path.} No block bootstrap or resampling was performed, so
+        no confidence interval accompanies the reported Sharpe ratio or drawdown.
+  \item \textbf{Costs are modelled crudely.} A flat $0.20\%$ of turnover, with no market-impact
+        or slippage term and no dependence on order size or liquidity.
+\end{itemize}
+
+\subsection{Conclusion}
+
+The portfolio selection problem was formulated as a convex, second-order-cone representable
+program in which the robust term is derived as an exact worst-case objective over an
+ellipsoidal uncertainty set rather than assumed, and in which the $\ell_1$ penalty serves
+simultaneously as a convex surrogate for the number of holdings and as a cap on gross leverage.
+A proximal-subgradient method was implemented in pure NumPy, resting on an exact joint
+proximal operator for the $\ell_1$ penalty and the budget constraint taken together
+(\cref{prop:jointprox}). That solver reproduces an independent interior-point solver's optimal
+value to $7.75 \times 10^{-6}$ relative gap and its active set exactly, on every parameter set
+tested. Out of sample, the resulting long-only strategy beat an equal-weight benchmark on a
+risk-adjusted basis over 494 trading days --- by a real but modest margin, at materially higher
+volatility, deeper drawdown, and roughly seven times the transaction cost.
+
+The methodological lesson is the one from \cref{sec:proxbug}. The original solver composed two
+individually correct operations --- soft thresholding and projection onto the budget hyperplane
+--- into an incorrect one, and returned portfolios that were feasible, plausible, and wrong by
+several percent in objective and by a factor of five in the number of positions held. Nothing
+in the output revealed it. It was found only by solving the same problem a second time with an
+unrelated algorithm and comparing. For convex problems, where a unique optimum makes such a
+comparison decisive, building that independent check is worth more than any amount of
+inspection of the primary implementation.
+
 \label{sec:endofbody}
