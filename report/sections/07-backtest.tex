@@ -3,37 +3,33 @@
 \subsection{Why the in-sample results are not enough}
 
 \Cref{sec:insample} estimates $\muhat$ and $\Sig$ from the full return panel and then optimizes
-against those same estimates. The resulting $w^\star$ is optimal for data it has already seen.
-A portfolio can look excellent under that procedure purely because $\muhat$ absorbed the
-particular noise of that particular period --- and nothing in the in-sample objective can
-distinguish that case from genuine predictive content.
-
-Separating the two requires an evaluation in which \textbf{every decision at time $t$ uses only
-data dated strictly before $t$}. That is what this section does.
+against those same estimates, so $w^\star$ is optimal for data it has already seen. A portfolio
+can look excellent under that procedure purely because $\muhat$ absorbed the noise of that
+particular period, and nothing in the in-sample objective distinguishes that case from genuine
+predictive content. Separating them requires an evaluation in which \textbf{every decision at
+time $t$ uses only data dated strictly before $t$}.
 
 \subsection{Design}
 
 \begin{itemize}
-  \item \textbf{Rolling window.} Each rebalance uses the 24 months of history immediately
-        preceding it, split into 18 months for estimation ($E$) and the following 6 months for
-        validation ($V$).
-  \item \textbf{Schedule.} Monthly rebalancing on the first trading day of each month.
+  \item \textbf{Rolling window.} Each rebalance uses the 24 months immediately preceding it,
+        split into 18 months for estimation ($E$) and the following 6 for validation ($V$).
+  \item \textbf{Schedule.} Monthly, on the first trading day of each month.
   \item \textbf{Long-only.} The deployed problem adds $w \ge 0$, unlike \cref{eq:main}, since
-        the target investor has no short access. As established in \cref{sec:method}, the
-        simplex constraint makes $\norm{w}_1 \equiv 1$, so $\lambda$ cannot affect the solution
-        and is dropped from the search rather than tuned pointlessly.
-  \item \textbf{Hyperparameter selection, per period.} The full grid
-        $(\kappa,\gamma) \in \{0, 0.5, 1, 2\} \times \{1, 5, 10\}$ --- twelve combinations ---
-        is fitted on $E$ and scored by Sharpe ratio ($r_f = 0$) on $V$, which was not used for
-        fitting. The best combination is then refitted on $E \cup V$ to produce the weights
-        actually deployed for the coming month.
-  \item \textbf{Shrinkage.} Ledoit--Wolf shrinkage \citep{ledoit2004} is applied throughout,
-        for both selection and the deployed fit.
-  \item \textbf{Costs.} $0.20\%$ of turnover at each rebalance. The first period carries
-        turnover $1$, since the portfolio is bought from cash.
-  \item \textbf{Benchmark.} Equal-weight $1/N$, rebalanced on the identical schedule under the
-        identical fee formula, so the comparison is like-for-like rather than a
-        fully-costed strategy against a frictionless index.
+        the target investor has no short access. As shown in \cref{sec:method}, the simplex
+        constraint makes $\norm{w}_1 \equiv 1$, so $\lambda$ cannot affect the solution and is
+        dropped from the search rather than tuned pointlessly.
+  \item \textbf{Hyperparameter selection, per period.} The grid
+        $(\kappa,\gamma) \in \{0, 0.5, 1, 2\} \times \{1, 5, 10\}$ --- twelve combinations --- is
+        fitted on $E$ and scored by Sharpe ratio ($r_f = 0$) on $V$, which was not used for
+        fitting; the winner is refitted on $E \cup V$ to give the weights actually deployed.
+  \item \textbf{Shrinkage.} Ledoit--Wolf \citep{ledoit2004} throughout, for both selection and
+        the deployed fit.
+  \item \textbf{Costs.} $0.20\%$ of turnover per rebalance; the first period carries turnover
+        $1$, the portfolio being bought from cash.
+  \item \textbf{Benchmark.} Equal-weight $1/N$ on the identical schedule under the identical fee
+        formula, so the comparison is like-for-like rather than a fully-costed strategy against a
+        frictionless index.
 \end{itemize}
 
 \subsection{Results}
@@ -59,37 +55,32 @@ Total transaction costs    & $3.44\%$   & $0.49\%$ \\
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.8\textwidth]{fig7_backtest_equity.png}
+\includegraphics[width=0.58\textwidth]{fig7_backtest_equity.png}
 \caption{Out-of-sample equity curves, net of transaction costs.}
 \label{fig:equity}
 \end{figure}
 
 \subsection{Interpretation}
 
-\paragraph{The win is real.}
-The strategy beats equal-weight $1/N$ on both cumulative return and Sharpe ratio. This is not a
-foregone conclusion: $1/N$ is a notoriously difficult baseline, and the finding that optimized
-portfolios routinely fail to beat it out of sample is well established
-\citep{demiguel2009}. It is worth stating that a loss would have been reported here just as
-readily --- the backtest was built before its outcome was known, and a negative result on a
-hard baseline would have been an equally legitimate finding.
+\textbf{The win is real.} The strategy beats equal-weight $1/N$ on both cumulative return and
+Sharpe ratio --- not a foregone conclusion, since $1/N$ is a notoriously difficult baseline and
+the finding that optimized portfolios routinely fail to beat it out of sample is well established
+\citep{demiguel2009}. A loss would have been reported just as readily: the backtest was built
+before its outcome was known.
 
-\paragraph{The win is narrow, and it is paid for.}
-Volatility is roughly $44\%$ higher than the benchmark's ($28.68\%$ against $19.88\%$) and the
-maximum drawdown is about $1.8$ times deeper ($-37.89\%$ against $-20.91\%$). The Sharpe ratio
-already nets this out, so the risk-adjusted edge ($0.5244$ against $0.4523$) is genuine --- but
-it is a modest edge, and an investor experiences the drawdown directly rather than
-experiencing the Sharpe ratio.
+\textbf{The win is narrow, and it is paid for.} Volatility is roughly $44\%$ higher than the
+benchmark's ($28.68\%$ against $19.88\%$) and the maximum drawdown about $1.8$ times deeper
+($-37.89\%$ against $-20.91\%$). The Sharpe ratio already nets this out, so the risk-adjusted
+edge ($0.5244$ against $0.4523$) is genuine --- but it is modest, and an investor experiences the
+drawdown directly rather than experiencing the Sharpe ratio.
 
-\paragraph{Costs are the binding practical problem.}
-Total fees are about seven times the benchmark's ($3.44\%$ against $0.49\%$) over the same 25
-rebalances, driven by an average monthly turnover near $69\%$. The cause is diagnosable rather
-than mysterious. Because $(\kappa,\gamma)$ is re-selected every period against a six-month
-validation window --- short, and therefore noisy --- $\gamma$ swings across
-$\{1, 5, 10\}$ between consecutive months without ever settling, and each swing rewrites the
-target portfolio wholesale. A secondary observation from the same selection record is that
-$\kappa$ is chosen as $0$ in most periods: a short-horizon Sharpe criterion rarely rewards the
-robust term on this data, which is consistent with robustness being a protection against tail
-scenarios that a two-year sample may simply not contain. Set against a raw cumulative return
-advantage of roughly nine percentage points, three points of fees --- before any slippage or
-market impact --- consumes a material share of the gain.
+\textbf{Costs are the binding practical problem.} Total fees are about seven times the
+benchmark's ($3.44\%$ against $0.49\%$) over the same 25 rebalances, driven by average monthly
+turnover near $69\%$. The cause is diagnosable: because $(\kappa,\gamma)$ is re-selected every
+period against a short and therefore noisy six-month validation window, $\gamma$ swings across
+$\{1, 5, 10\}$ between consecutive months without settling, and each swing rewrites the target
+portfolio wholesale. A secondary observation from the same record is that $\kappa$ is selected as
+$0$ in most periods: a short-horizon Sharpe criterion rarely rewards the robust term on this
+data, consistent with robustness protecting against tail scenarios a two-year sample may not
+contain. Against a raw cumulative return advantage of roughly nine percentage points, three
+points of fees --- before slippage or market impact --- consumes a material share of the gain.

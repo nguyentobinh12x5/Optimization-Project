@@ -115,6 +115,18 @@ probability simplex and the $\lambda$ argument disappears.}
 \label{alg:proxsub}
 \end{figure}
 
+\section{The Effect of the Robust Term}\label{app:robust}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.62\textwidth]{fig5_robust_effect.png}
+\caption{Active positions and Herfindahl--Hirschman index as $\kappa$ increases from $0$ to $1$
+with $\gamma$ and $\lambda$ held fixed. Both rise: the portfolio becomes more concentrated, not
+more diversified. The mechanism --- degree-one homogeneity of the robust term --- is discussed in
+\cref{sec:insample}.}
+\label{fig:robust}
+\end{figure}
+
 \section{Full Cross-Verification Results}\label{app:verification}
 
 \Cref{tab:cvxpyfull} is the complete comparison summarized in \cref{tab:cvxpy}. The additional
@@ -150,6 +162,14 @@ $\kappa$ & $\gamma$ & $\lambda$ & $f_{\text{hand}}$ & $f_{\text{cvx}}$ & Rel.\ g
 \bottomrule
 \end{tabular}
 \end{table}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.5\textwidth]{fig6_prox_vs_cvxpy.png}
+\caption{Weights from the hand-written solver against those from CVXPY/CLARABEL, for a parameter
+set with $\lambda > 0$. The points lie on the line $y = x$.}
+\label{fig:proxcvx}
+\end{figure}
 
 \begin{figure}[htbp]
 \centering

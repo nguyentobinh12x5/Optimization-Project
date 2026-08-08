@@ -1,6 +1,7 @@
 \documentclass[11pt,a4paper]{article}
 
-\usepackage[margin=1in]{geometry}
+\usepackage[margin=0.9in]{geometry}
+\usepackage{enumitem}
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage{amsmath,amssymb,amsthm}
@@ -19,6 +20,15 @@
             urlcolor=blue!50!black}
 
 \newtheorem{proposition}{Proposition}
+
+% Tighter list and float spacing. This is density, not content: the 10-page
+% limit applies to the body, and whitespace is the cheapest thing to give up.
+\setlist{topsep=2pt, itemsep=1pt, parsep=0pt}
+\setlength{\floatsep}{8pt plus 2pt minus 2pt}
+\setlength{\textfloatsep}{10pt plus 2pt minus 2pt}
+\setlength{\intextsep}{8pt plus 2pt minus 2pt}
+\setlength{\abovecaptionskip}{4pt}
+\setlength{\belowcaptionskip}{2pt}
 
 % Shorthands used throughout the report.
 \newcommand{\R}{\mathbb{R}}

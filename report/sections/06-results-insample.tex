@@ -3,24 +3,21 @@
 \subsection{Estimating the inputs}
 
 $\muhat$ is the column-wise sample mean of the return panel and $\Sig$ its sample covariance
-(with $\text{ddof} = 1$), symmetrized to remove floating-point asymmetry. The square root
-$\Ssqrt$ is built by \textbf{eigendecomposition rather than Cholesky factorization}, and the
-reason is not stylistic: a sample covariance estimated with $N = 98$ from $T = 965$
-observations is positive \emph{semi}definite at best, and in floating point carries a few
-eigenvalues that are marginally negative. Cholesky requires strict positive definiteness and
-simply fails. The implementation instead computes $\Sig = V\operatorname{diag}(\ell)V^\top$,
-clips negative $\ell_i$ to zero, and sets
-$\Ssqrt = V\operatorname{diag}(\sqrt{\ell})V^\top$. The reconstruction is accurate to
-$\norm{\Ssqrt\Ssqrt - \Sig}_F / \norm{\Sig}_F = 1.831 \times 10^{-15}$, i.e.\ to machine
-precision.
+($\text{ddof} = 1$), symmetrized. The square root $\Ssqrt$ is built by \textbf{eigendecomposition
+rather than Cholesky factorization}: a sample covariance estimated with $N = 98$ from $T = 965$
+observations is positive \emph{semi}definite at best and in floating point carries a few
+marginally negative eigenvalues, on which Cholesky --- requiring strict positive definiteness ---
+simply fails. The implementation computes $\Sig = V\operatorname{diag}(\ell)V^\top$, clips
+negative $\ell_i$ to zero, and sets $\Ssqrt = V\operatorname{diag}(\sqrt{\ell})V^\top$,
+reconstructing $\Sig$ to $\norm{\Ssqrt\Ssqrt - \Sig}_F / \norm{\Sig}_F = 1.831 \times 10^{-15}$.
 
 \subsection{Solver behaviour and the effect of $\lambda$}
 
-\Cref{tab:demo} reports two representative solves. In both cases $\one^\top w = 1$ holds to
-$10^{-12}$, and the reported zeros are \textbf{exact} zeros produced by the proximal step, not
-small values falling below a display threshold. That distinction is the practical payoff of
-\cref{prop:jointprox}: the model's sparsity is real, so the count of nonzero weights is a
-count of positions the investor would actually open.
+\Cref{tab:demo} reports two representative solves. In both, $\one^\top w = 1$ holds to
+$10^{-12}$ and the reported zeros are \textbf{exact} zeros produced by the proximal step, not
+small values below a display threshold. That is the practical payoff of \cref{prop:jointprox}:
+the sparsity is real, so the count of nonzero weights is a count of positions the investor would
+actually open.
 
 \begin{table}[htbp]
 \centering
@@ -39,83 +36,63 @@ $(0,\, 5,\, 0.10)$ & 2113 & 0.099071 & 10 / 98 & 88 / 98 \\
 
 \begin{figure}[htbp]
 \centering
-\begin{subfigure}[t]{0.49\textwidth}
+\begin{subfigure}[t]{0.44\textwidth}
   \centering
   \includegraphics[width=\textwidth]{fig2_convergence.png}
   \caption{Objective against iteration count.}
   \label{fig:convergence}
 \end{subfigure}
 \hfill
-\begin{subfigure}[t]{0.49\textwidth}
+\begin{subfigure}[t]{0.44\textwidth}
   \centering
   \includegraphics[width=\textwidth]{fig3_sparsity_path.png}
   \caption{Active positions against $\lambda$.}
   \label{fig:sparsity}
 \end{subfigure}
-\caption{Left: convergence of the proximal-subgradient method; the non-monotone early phase is
-expected of a subgradient method and is why the solver returns the best iterate rather than the
-last. Right: the sparsity path.}
+\caption{Left: convergence; the non-monotone early phase is expected of a subgradient method and
+is why the solver returns the best iterate. Right: the sparsity path.}
 \label{fig:solver}
 \end{figure}
 
-\Cref{fig:sparsity} traces the number of active positions as $\lambda$ sweeps a logarithmic
-grid. The count falls as $\lambda$ rises, but \textbf{not strictly monotonically}, and the
-reason is structural rather than numerical: $\lambda$ enters only through the threshold
-$t = \alpha_k\lambda$, and raising $t$ also shifts the multiplier $\nu^\star$ that enforces the
-budget constraint in \cref{prop:jointprox}. A larger $\lambda$ can therefore move
-$z_i + \nu^\star$ far enough for a coordinate to re-enter the active set even as most others
-leave it. The trend is unambiguous; the monotonicity is not, and the figure is reported as it
-is rather than smoothed.
+\Cref{fig:sparsity} traces active positions as $\lambda$ sweeps a logarithmic grid. The count
+falls as $\lambda$ rises but \textbf{not strictly monotonically}, for a structural rather than
+numerical reason: $\lambda$ enters only through the threshold $t = \alpha_k\lambda$, and raising
+$t$ also shifts the multiplier $\nu^\star$ enforcing the budget constraint in
+\cref{prop:jointprox}, so a larger $\lambda$ can move $z_i + \nu^\star$ far enough for a
+coordinate to re-enter the active set even as others leave. The trend is unambiguous; the
+monotonicity is not, and the figure is reported as it is rather than smoothed.
 
 \subsection{The effect of the robust term}
 
-Raising $\kappa$ from $0$ to $1$, with $\gamma$ and $\lambda$ held fixed, \textbf{increases}
-both the number of active positions and the Herfindahl--Hirschman concentration index
-(\cref{fig:robust}). The portfolio becomes \emph{more} concentrated. The folk intuition ---
-robust means cautious means diversified --- predicts the opposite.
-
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.75\textwidth]{fig5_robust_effect.png}
-\caption{Effect of the robust term. Turning $\kappa$ on increases concentration on this
-universe, contrary to the usual intuition.}
-\label{fig:robust}
-\end{figure}
-
-A mechanism is available, and it is the degree-one homogeneity established in
-\cref{eq:robust-derivation}. Because $\kappa\norm{\Ssqrt w}_2$ is a norm rather than a squared
-norm, its subgradient $\kappa\,\Sig w / \norm{\Ssqrt w}_2$ has magnitude that does \emph{not}
-shrink as $\norm{w}$ shrinks --- unlike the variance term's gradient $2\gamma\Sig w$, which
-weakens proportionally. The robust term thus exerts a scale-independent pull in a fixed
-direction. Given the eigenstructure of a covariance matrix estimated from 98 heavily co-moving
-Vietnamese large caps, where a single market factor dominates, that pull is served more
-efficiently by concentrating weight along a low-variance combination of a few names than by
-spreading it across many correlated ones.
-
-This is an empirical observation on one dataset accompanied by a plausible mechanism. It is
-\emph{not} a theorem about every $\Sig$, and it should not be generalized into one.
+Raising $\kappa$ from $0$ to $1$ with $\gamma, \lambda$ fixed \textbf{increases} both the number
+of active positions and the Herfindahl--Hirschman concentration index: the portfolio becomes
+\emph{more} concentrated, where the folk intuition --- robust means cautious means diversified
+--- predicts the opposite. The mechanism is the degree-one homogeneity of
+\cref{eq:robust-derivation}: because $\kappa\norm{\Ssqrt w}_2$ is a norm rather than a squared
+norm, its subgradient $\kappa\,\Sig w / \norm{\Ssqrt w}_2$ does \emph{not} shrink in magnitude as
+$\norm{w}$ shrinks, unlike the variance gradient $2\gamma\Sig w$, so it exerts a scale-independent
+pull in a fixed direction --- which, given a covariance matrix dominated by a single market
+factor, is served more efficiently by concentrating weight along a low-variance combination of a
+few names than by spreading it across many correlated ones. This is an empirical observation on
+one dataset with a plausible mechanism, \emph{not} a theorem about every $\Sig$.
+\Cref{app:robust} gives the figure.
 
 \subsection{Cross-verification against an interior-point solver}
 
-The argument for this subsection is worth stating before its numbers. The method of
-\cref{sec:method} is first-order, hand-written, and specific to this problem. CLARABEL
-\citep{clarabel2024}, invoked through CVXPY \citep{diamond2016}, is a general-purpose
-second-order interior-point solver operating on the conic reformulation \cref{eq:socp}. The two
-share no code, no algorithmic family, and no failure modes. \Cref{sec:correctness} established
-that \cref{eq:main} is convex, so its optimal value is unique and two correct solvers must
-agree on it.
-
-Agreement on the objective is the weaker test. Agreement on the \textbf{active set} is far
-stronger, because the support is a discrete object: a solution that is numerically close but
-structurally wrong --- for instance one produced by the prox-then-project scheme of
-\cref{sec:proxbug} --- will generally get the support wrong even while landing near the right
-objective value. That is exactly how the bug was caught.
+The method of \cref{sec:method} is first-order, hand-written, and specific to this problem.
+CLARABEL \citep{clarabel2024}, invoked through CVXPY \citep{diamond2016}, is a general-purpose
+second-order interior-point solver operating on the conic reformulation \cref{eq:socp}. They
+share no code, no algorithmic family, and no failure modes, and \cref{sec:correctness}
+established that the optimal value is unique --- so two correct solvers must agree on it.
+Agreement on the objective is the weaker test; agreement on the \textbf{active set} is far
+stronger, because the support is a discrete object that a numerically close but structurally
+wrong solution --- such as one from the scheme of \cref{sec:proxbug} --- will generally get wrong
+even while landing near the right objective value. That is exactly how the bug was caught.
 
 \begin{table}[htbp]
 \centering
-\caption{Hand-written solver against CVXPY/CLARABEL across the parameter grid. ``Jaccard'' is
-the Jaccard similarity of the two active sets, so $1.00$ means the supports are identical. The
-full table, including $\ell_\infty$ weight distances and iteration counts, is in
+\caption{Hand-written solver against CVXPY/CLARABEL. Jaccard $= 1.00$ means the supports are
+identical. The full table, with $\ell_\infty$ weight distances and iteration counts, is in
 \cref{app:verification}.}
 \label{tab:cvxpy}
 \small
@@ -134,27 +111,17 @@ $\kappa$ & $\gamma$ & $\lambda$ & $f_{\text{hand}}$ & Rel.\ gap
 \end{tabular}
 \end{table}
 
-The result is unambiguous: the \textbf{maximum relative objective gap is $0.000775\%$}, and the
-\textbf{active sets match exactly on all six of six parameter sets}, with every run of the
-hand-written solver reporting convergence. \Cref{fig:proxcvx} shows the individual weights
-lying on the line $y = x$.
+The result is unambiguous: the \textbf{maximum relative objective gap is $0.000775\%$} and the
+\textbf{active sets match exactly on all six of six parameter sets}, every run reporting
+convergence; \cref{fig:proxcvx} in \cref{app:verification} shows the individual weights lying on
+the line $y = x$.
 
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.55\textwidth]{fig6_prox_vs_cvxpy.png}
-\caption{Weights from the hand-written solver against those from CVXPY/CLARABEL, for a
-parameter set with $\lambda > 0$.}
-\label{fig:proxcvx}
-\end{figure}
+The last row is a deliberate control: with $\lambda = 0$ the $\ell_1$ penalty is off and both
+solvers return a fully dense portfolio of 98 active positions. Without it, identical supports
+could in principle reflect nothing more than two methods trivially zeroing the same coordinates;
+the dense case shows the agreement survives when there is no sparsity to agree about.
 
-The last row of \cref{tab:cvxpy} is a deliberate control. With $\lambda = 0$ the $\ell_1$
-penalty is switched off entirely and both solvers return a fully dense portfolio, 98 positions
-active. Without that row, identical supports could in principle reflect nothing more than two
-methods trivially zeroing the same coordinates; the dense case shows the agreement survives
-when there is no sparsity to agree about.
-
-One implementation detail deserves disclosure. CVXPY rejects a covariance matrix that is not
-strictly positive semidefinite in floating point, and the estimated $\Sig$ has a few marginally
-negative eigenvalues, so the code wraps it in \texttt{cp.psd\_wrap} to suppress that check.
-This relaxes a numerical tolerance --- the same concession made by clipping eigenvalues when
-forming $\Ssqrt$ --- and does not alter the data passed to either solver.
+One detail deserves disclosure. CVXPY rejects a covariance matrix that is not strictly positive
+semidefinite in floating point, so the code wraps $\Sig$ in \texttt{cp.psd\_wrap} to suppress
+that check. This relaxes a numerical tolerance --- the same concession as clipping eigenvalues
+when forming $\Ssqrt$ --- and does not alter the data passed to either solver.

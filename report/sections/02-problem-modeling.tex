@@ -6,16 +6,10 @@ The \textbf{decision variable} is the weight vector $w \in \R^{N}$ with $N = 98$
 is the fraction of total capital allocated to stock $i$. A negative $w_i$ denotes a short
 position.
 
-The \textbf{constants} are the statistical inputs, all estimated from historical data before
-the optimization runs and held fixed while it does:
-\begin{itemize}
-  \item $\muhat \in \R^{N}$, the sample mean of daily returns;
-  \item $\Sig \in \mathbb{S}^{N}_{+}$, the sample covariance matrix of daily returns;
-  \item $\Ssqrt$, the symmetric positive-semidefinite square root of $\Sig$, so that
-        $\Ssqrt\Ssqrt = \Sig$.
-\end{itemize}
-
-The three scalars $\kappa, \gamma, \lambda \ge 0$ are \textbf{hyperparameters, not decision
+The \textbf{constants} are the statistical inputs, estimated from historical data before the
+optimization runs and held fixed while it does: $\muhat \in \R^{N}$, the sample mean of daily
+returns; $\Sig \in \mathbb{S}^{N}_{+}$, their sample covariance; and $\Ssqrt$, the symmetric
+positive-semidefinite square root of $\Sig$, so that $\Ssqrt\Ssqrt = \Sig$. The three scalars $\kappa, \gamma, \lambda \ge 0$ are \textbf{hyperparameters, not decision
 variables}. The optimizer treats them as fixed constants; they are chosen by the modeller when
 exploring the solution family (\cref{sec:insample}) or by validation on held-out data
 (\cref{sec:backtest}).
@@ -61,15 +55,12 @@ $\lambda \norm{w}_1$
 \subsection{Constraints}
 
 The single explicit constraint is the \textbf{budget constraint} $\one^\top w = 1$: the
-portfolio is fully invested, with no idle cash and no borrowing beyond what a short position
-implies.
-
-\textbf{There is no constraint $w \ge 0$ in \cref{eq:main}.} Short selling is permitted. This
-is a deliberate modelling decision made at the outset, not an omission, and it should be kept
-in mind when reading \cref{sec:insample}: a reader who assumes a long-only portfolio will
-misinterpret every weight vector reported there. \Cref{sec:backtest} does add $w \ge 0$ for the
-deployed strategy, and explains at that point why the out-of-sample study is long-only while
-the in-sample study is not.
+portfolio is fully invested. \textbf{There is no constraint $w \ge 0$} --- short selling is
+permitted, a deliberate decision made at the outset rather than an omission, and one to keep in
+mind when reading \cref{sec:insample}, since a reader who assumes a long-only portfolio will
+misinterpret every weight reported there. \Cref{sec:backtest} does add $w \ge 0$ for the deployed
+strategy, and explains there why the out-of-sample study is long-only while the in-sample study
+is not.
 
 \subsection{Type of Optimization Problem}
 
@@ -86,22 +77,19 @@ representability is established by exhibiting the epigraph reformulation
   & \one^\top w = 1 .
 \end{aligned}
 \end{equation}
-The first constraint is a second-order cone constraint on $(\Ssqrt w, t)$ directly. The second
-is a rotated second-order cone constraint, using the identity
-$w^\top \Sig w = w^\top \Ssqrt \Ssqrt w = \norm{\Ssqrt w}_2^2$. The third is the standard
-linear splitting of the $\ell_1$ norm, which is tight at the optimum because $\lambda \ge 0$
-pushes each $u_i$ down to $|w_i|$. The fourth is affine. Every constraint is thus affine or
-conic, and the objective is linear in the lifted variables $(w,t,s,u)$, so \cref{eq:main} is a
-second-order cone program. This is what makes it legitimate to hand the same problem to an
-interior-point conic solver in \cref{sec:insample} and treat that solver's answer as
-independent ground truth.
+The first constraint is a second-order cone constraint on $(\Ssqrt w, t)$; the second is a
+rotated second-order cone, using $w^\top \Sig w = \norm{\Ssqrt w}_2^2$; the third is the standard
+linear splitting of the $\ell_1$ norm, tight at the optimum because $\lambda \ge 0$ pushes each
+$u_i$ down to $|w_i|$; the fourth is affine. Every constraint is thus affine or conic and the
+objective linear in $(w,t,s,u)$, so \cref{eq:main} is a second-order cone program --- which is
+what makes it legitimate to hand the same problem to an interior-point conic solver in
+\cref{sec:insample} and treat its answer as independent ground truth.
 
-Nondifferentiability is the property that shapes the algorithm. Two of the four terms are
-nonsmooth: $\kappa\norm{\Ssqrt w}_2$ fails to be differentiable wherever $\Ssqrt w = 0$, and
-$\lambda\norm{w}_1$ fails to be differentiable at every point where some coordinate $w_i$ is
-zero --- which, for a penalty whose entire purpose is to drive coordinates to zero, is exactly
-where the solution lives. Plain gradient descent therefore does not apply, and
-\cref{sec:method} builds a proximal-subgradient method instead.
+Nondifferentiability shapes the algorithm. Two of the four terms are nonsmooth:
+$\kappa\norm{\Ssqrt w}_2$ fails to be differentiable wherever $\Ssqrt w = 0$, and
+$\lambda\norm{w}_1$ at every point where some $w_i$ is zero --- which, for a penalty whose
+purpose is to drive coordinates to zero, is exactly where the solution lives. Plain gradient
+descent therefore does not apply, and \cref{sec:method} builds a proximal-subgradient method.
 
 \subsection{Modeling Assumptions}
 
