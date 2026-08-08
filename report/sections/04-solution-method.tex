@@ -1,1 +1,213 @@
 \section{Solving the Problem: Method}\label{sec:method}
+
+\subsection{Why a first-order proximal method}
+
+Problem \cref{eq:main} splits naturally as $\min_w f(w) + g(w)$ with
+\begin{equation}\label{eq:split}
+f(w) = -\muhat^\top w + \kappa\norm{\Ssqrt w}_2 + \gamma\, w^\top \Sig w,
+\qquad
+g(w) = \lambda\norm{w}_1 + \mathbb{1}\{\one^\top w = 1\},
+\end{equation}
+where $\mathbb{1}\{\cdot\}$ is the indicator function that is $0$ on the feasible set and
+$+\infty$ off it. The part $f$ admits a subgradient everywhere; the part $g$ is nonsmooth and
+has no gradient anywhere useful, but --- as \cref{prop:jointprox} below shows --- its
+proximal operator can be computed \emph{exactly}. That is precisely the situation proximal
+methods are built for \citep{parikh2014}. Folding the budget constraint into $g$ rather than
+treating it separately is the decision that makes the whole method work, for reasons that
+\cref{sec:proxbug} makes concrete.
+
+The solver is written in pure NumPy. No \texttt{cvxpy}, \texttt{scipy.optimize}, or
+\texttt{sklearn} routine is used anywhere in it; those appear only in the independent
+verification module of \cref{sec:insample}.
+
+\subsection{The subgradient step}
+
+At iterate $w_k$, the method takes a subgradient of $f$:
+\begin{equation}\label{eq:subgrad}
+v_k \;=\; -\muhat \;+\; 2\gamma\,\Sig w_k
+        \;+\; \kappa\,\frac{\Sig w_k}{\norm{\Ssqrt w_k}_2}.
+\end{equation}
+The first two terms are standard. The third deserves derivation, because it is the step at
+which an implementation is most easily and most silently wrong. Writing $u = \Ssqrt w$ and
+using the symmetry of $\Ssqrt$, the chain rule gives
+\begin{equation}\label{eq:chainrule}
+\nabla_w \norm{\Ssqrt w}_2
+  \;=\; \bigl(\Ssqrt\bigr)^\top \frac{u}{\norm{u}_2}
+  \;=\; \frac{\Ssqrt \Ssqrt w}{\norm{\Ssqrt w}_2}
+  \;=\; \frac{\Sig w}{\norm{\Ssqrt w}_2}.
+\end{equation}
+The numerator is $\Sig w$, the \emph{full} covariance matrix applied to $w$ --- not
+$\Ssqrt w$. Writing $\Ssqrt w$ there is a natural-looking substitution, since $\Ssqrt$ is what
+appears inside the norm, and it yields a solver that runs without complaint and converges to
+the wrong point.
+
+At $w$ with $\Ssqrt w = 0$ the expression \cref{eq:chainrule} is undefined, since the
+Euclidean norm is not differentiable at the origin. The implementation branches: when
+$\norm{\Ssqrt w_k}_2 \le \varepsilon$ it takes the subgradient to be $0$, which is legitimate
+because the subdifferential of $\norm{\cdot}_2$ at the origin is the entire closed unit ball
+and therefore contains $0$.
+
+\subsection{Step size}
+
+The descent step is $z_k = w_k - \alpha_k v_k$ with the decreasing step size
+\begin{equation}\label{eq:stepsize}
+\alpha_k = \frac{\alpha_0}{\sqrt{k+1}}, \qquad \alpha_0 = 10 .
+\end{equation}
+This schedule is square-summable but not summable, $\sum_k \alpha_k = \infty$ and
+$\sum_k \alpha_k^2 < \infty$, which is the standard sufficient condition for a subgradient
+method to converge to the optimal value on a convex objective \citep{boyd2004}. A constant
+step size would not do: it drives the iterates only into a neighbourhood of the optimum whose
+radius scales with the step, and would leave a floor on the objective gap that no amount of
+iteration removes.
+
+\subsection{The joint proximal step}
+
+The remaining piece is the prox of $g$. It is stated here as a proposition because getting it
+right, rather than approximately right, is the technical core of the implementation.
+
+\begin{proposition}[Exact prox of $\ell_1$ plus a budget constraint]\label{prop:jointprox}
+Let $z \in \R^N$, let $t > 0$, and let
+$\softt_t(x) = \operatorname{sign}(x)\max(|x| - t,\, 0)$ denote coordinate-wise soft
+thresholding. The problem
+\[
+  \prox_{g}(z) \;=\; \arg\min_{w \in \R^N}\;
+    \tfrac{1}{2}\norm{w - z}_2^2 + t\norm{w}_1
+    \quad \text{subject to} \quad \one^\top w = 1
+\]
+has the unique solution $w_i = \softt_t(z_i + \nu^\star)$, $i = 1,\dots,N$, where $\nu^\star$
+is a root of
+\[
+  h(\nu) \;:=\; \sum_{i=1}^{N} \softt_t(z_i + \nu) \;-\; 1 .
+\]
+\end{proposition}
+
+\begin{proof}
+The objective is strongly convex and the constraint affine, so the minimizer exists and is
+unique and strong duality holds. Introduce a multiplier $\nu$ for the budget constraint:
+\[
+  L(w,\nu) = \tfrac12\norm{w-z}_2^2 + t\norm{w}_1 - \nu\bigl(\one^\top w - 1\bigr)
+           = \sum_{i=1}^{N}\Bigl[\tfrac12 (w_i - z_i)^2 + t|w_i| - \nu w_i\Bigr] + \nu .
+\]
+For fixed $\nu$ the Lagrangian \emph{separates across coordinates}: each bracketed summand
+involves only $w_i$. Completing the square in the smooth part,
+\[
+  \tfrac12 (w_i - z_i)^2 - \nu w_i
+  = \tfrac12\bigl(w_i - (z_i + \nu)\bigr)^2 - \nu z_i - \tfrac{\nu^2}{2},
+\]
+so minimizing the $i$-th summand is exactly evaluating the scalar prox of $t|\cdot|$ at
+$z_i + \nu$, whose closed form is soft thresholding:
+$w_i(\nu) = \softt_t(z_i + \nu)$.
+
+It remains to choose $\nu$ so that the primal constraint holds, i.e. to solve $h(\nu) = 0$.
+Each map $\nu \mapsto \softt_t(z_i + \nu)$ is continuous and non-decreasing, hence so is $h$;
+moreover $h(\nu) \to \pm\infty$ as $\nu \to \pm\infty$. A root therefore exists, and the
+implementation locates it by first bracketing it through geometric expansion of an initial
+interval and then \textbf{bisecting} to a tolerance of $10^{-12}$ on $|h(\nu)|$. Substituting
+$\nu^\star$ back gives the claimed minimizer.
+\end{proof}
+
+The two properties that matter hold \emph{simultaneously}, and this is the whole point of
+solving the prox jointly. Every coordinate with $|z_i + \nu^\star| \le t$ is set to
+\textbf{exactly zero} --- a true zero in floating point, not a small number below a display
+threshold --- while $\one^\top w = 1$ holds to the bisection tolerance. Neither property is
+traded against the other.
+
+\subsection{What this replaced: the prox-then-project bug}\label{sec:proxbug}
+
+The first version of this solver did not compute the prox of $g$ jointly. It handled the two
+nonsmooth pieces in sequence: soft-threshold first, then restore feasibility by a separate
+Euclidean projection onto the hyperplane $\{\one^\top w = 1\}$, which adds the uniform offset
+$\bigl(1 - \one^\top w_{\text{half}}\bigr)/N$ to \emph{every} coordinate.
+
+The failure is immediate once stated: that uniform offset is added to the coordinates that
+soft thresholding had just set to zero, reviving them. The returned portfolio satisfies the
+budget constraint and looks entirely plausible, but it is not sparse, and it is not the
+minimizer.
+
+The effect was not marginal. Cross-checking against the independent solver of
+\cref{sec:insample} on real data and identical parameters, the two-step version reported
+\textbf{48 active positions where the reference solver reported 9}, with an objective gap of
+\textbf{2.7--6\%}.
+
+The general statement is that
+\begin{equation}\label{eq:proxnotcompose}
+\prox_{f_1 + f_2} \;\neq\; \prox_{f_1} \circ \prox_{f_2}
+\end{equation}
+in general: the proximal operator of a \emph{sum} of nonsmooth functions is not the
+composition of their individual proximal operators, and the two operations do not commute.
+When an objective carries several nonsmooth components at once --- here an $\ell_1$ penalty
+and an affine constraint --- the prox of the sum must be solved as one problem.
+\Cref{prop:jointprox} is exactly that joint solution.
+
+Two things are worth drawing out. First, each individual step in the broken version was
+correct in isolation: soft thresholding is the right prox for $\ell_1$, and the uniform offset
+is the right Euclidean projection onto the hyperplane. It is only their composition that is
+wrong, which is why the error survived inspection. Second, the output gave no signal --- a
+portfolio of 48 positions summing to one is not visibly defective. The bug was found only by
+comparing against an independently implemented solver, which is the argument for
+\cref{sec:insample} existing at all.
+
+\subsection{Best-iterate tracking and the long-only variant}
+
+\paragraph{Best-iterate.}
+A subgradient method is not a descent method: $f(w_{k+1}) \le f(w_k)$ is not guaranteed, and
+in practice the objective oscillates, particularly early on while $\alpha_k$ is still large.
+The implementation therefore records $\min_{j \le k} f(w_j)$ along with the iterate attaining
+it, and returns that iterate rather than the last one. Returning the final iterate would
+report an objective worse than the method actually achieved. Termination is likewise judged on
+the best objective: the loop stops once the relative change in $\min_{j\le k} f(w_j)$ stays
+below $10^{-8}$ for $100$ consecutive iterations.
+
+\paragraph{Long-only variant.}
+The backtest of \cref{sec:backtest} adds $w \ge 0$, so the feasible set becomes the
+probability simplex $\{w : w \ge 0,\ \one^\top w = 1\}$. Two things change. The proximal step
+becomes Euclidean projection onto that simplex, computed by the standard sort-and-threshold
+algorithm \citep{duchi2008}. And, more interestingly, the $\ell_1$ term disappears: on the
+simplex $\norm{w}_1 = \one^\top w = 1$ identically, so $\lambda\norm{w}_1$ contributes the
+constant $\lambda$ to the objective regardless of which feasible $w$ is chosen, and therefore
+cannot influence the argmin. The practical consequence is that $\lambda$ is dropped from the
+hyperparameter grid in \cref{sec:backtest}: searching over it would consume compute and change
+nothing. The smooth-plus-robust subgradient \cref{eq:subgrad} is reused unchanged.
+
+\subsection{The algorithm}
+
+\begin{figure}[htbp]
+\centering
+\begin{minipage}{0.92\textwidth}
+\begin{lstlisting}[language={}, basicstyle=\ttfamily\footnotesize, numbers=none,
+                   frame=single, caption={}, label={}]
+Input:  mu_hat, Sigma, Sigma^(1/2), kappa, gamma, lambda,
+        alpha_0 = 10, max_iter = 5000, tol = 1e-8, patience = 100
+w_0     <- (1/N) * 1                      # feasible start: 1'w = 1
+best_obj <- +infinity
+stall    <- 0
+
+for k = 0, 1, 2, ..., max_iter - 1:
+    r <- ||Sigma^(1/2) w_k||_2
+    s <- (Sigma w_k) / r   if r > eps   else   0        # robust subgradient
+    v <- -mu_hat + 2*gamma*(Sigma w_k) + kappa*s        # eq. (7)
+    alpha <- alpha_0 / sqrt(k+1)                        # eq. (9)
+    z <- w_k - alpha*v                                  # subgradient step
+    w_{k+1} <- JointProx(z, t = alpha*lambda)           # Proposition 1
+    f <- objective(w_{k+1})
+    if f < best_obj:
+        rel <- |best_obj - f| / max(|best_obj|, tiny)
+        best_obj <- f;  best_w <- w_{k+1}
+    stall <- stall + 1  if rel < tol  else  0
+    if stall >= patience: break                         # converged
+
+return best_w, best_obj
+
+JointProx(z, t):                                        # Proposition 1
+    bracket nu in [-1, 1], expanding geometrically until
+        h(nu_lo) <= 0 <= h(nu_hi),  where h(nu) = sum_i S_t(z_i + nu) - 1
+    bisect on nu until |h(nu)| < 1e-12
+    return S_t(z + nu*)                    # exact zeros where |z_i+nu*| <= t
+\end{lstlisting}
+\end{minipage}
+\caption{The proximal-subgradient method. \texttt{S\_t} denotes coordinate-wise soft
+thresholding at level $t$. The only nontrivial step is \texttt{JointProx}, which implements
+\cref{prop:jointprox}; replacing it with soft thresholding followed by a separate projection
+reintroduces the bug of \cref{sec:proxbug}.}
+\label{alg:proxsub}
+\end{figure}
