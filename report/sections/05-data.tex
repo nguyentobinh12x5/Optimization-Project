@@ -1,1 +1,33 @@
 \section{Data}\label{sec:data}
+
+Constituents of the VN100 index were obtained through the \texttt{vnstock} library
+\citep{vnstock}, and $N = 98$ tickers survive cleaning. The price panel spans
+\textbf{2022-07-26 to 2026-07-24} ($997 \times 98$), and the derived simple-return panel spans
+\textbf{2022-07-27 to 2026-07-24} ($965 \times 98$). All results in this report use that
+return panel.
+
+Two defects in the vendor feed were found and corrected, and both matter enough to name.
+First, \textbf{phantom weekend sessions}: the source occasionally repeated the previous
+session's close under a Saturday or Sunday date. Left in place, these inject spurious
+zero-return days that pull $\muhat$ toward zero and deflate every entry of $\Sig$ --- they
+corrupt precisely the two inputs the model consumes. They are removed by dropping rows falling
+on a weekend. Second, \textbf{inconsistent intraday timestamps across sources}: the primary
+and fallback endpoints return different times of day for the same trading session, so merging
+several tickers silently doubles the row count, producing a panel riddled with missing values
+that no ticker actually has. Normalizing every timestamp to its calendar date before the merge
+resolves it.
+
+A weekday filter cannot catch Vietnamese public holidays falling on a weekday --- Tet, 30
+April, 1 May, 2 September --- on which the same repeated-price artifact can appear. Rather
+than maintaining a hard-coded holiday calendar, which would need updating every year and would
+silently rot, the loader applies a statistical rule: any session on which at least $90\%$ of
+tickers post \emph{exactly} zero return is treated as a repeated-price artifact and dropped.
+On the present dataset this filter removes no additional rows. It is a guard against future
+data rather than a fix for a problem in the current panel, and it is reported that way here
+because claiming otherwise would overstate the cleaning that actually took place.
+
+One structural limitation is worth stating before any result is presented. The \emph{current}
+VN100 membership is applied backward across the full four years, so companies that left the
+index or were delisted during the period are absent from the universe. The sample is therefore
+biased toward survivors, which tends to flatter any strategy evaluated on it, including the
+benchmark. This is revisited in \cref{sec:conclusion}.
