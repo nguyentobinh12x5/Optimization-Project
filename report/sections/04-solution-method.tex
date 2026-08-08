@@ -81,30 +81,12 @@ is a root of
 \]
 \end{proposition}
 
-\begin{proof}
-The objective is strongly convex and the constraint affine, so the minimizer exists and is
-unique and strong duality holds. Introduce a multiplier $\nu$ for the budget constraint:
-\[
-  L(w,\nu) = \tfrac12\norm{w-z}_2^2 + t\norm{w}_1 - \nu\bigl(\one^\top w - 1\bigr)
-           = \sum_{i=1}^{N}\Bigl[\tfrac12 (w_i - z_i)^2 + t|w_i| - \nu w_i\Bigr] + \nu .
-\]
-For fixed $\nu$ the Lagrangian \emph{separates across coordinates}: each bracketed summand
-involves only $w_i$. Completing the square in the smooth part,
-\[
-  \tfrac12 (w_i - z_i)^2 - \nu w_i
-  = \tfrac12\bigl(w_i - (z_i + \nu)\bigr)^2 - \nu z_i - \tfrac{\nu^2}{2},
-\]
-so minimizing the $i$-th summand is exactly evaluating the scalar prox of $t|\cdot|$ at
-$z_i + \nu$, whose closed form is soft thresholding:
-$w_i(\nu) = \softt_t(z_i + \nu)$.
-
-It remains to choose $\nu$ so that the primal constraint holds, i.e. to solve $h(\nu) = 0$.
-Each map $\nu \mapsto \softt_t(z_i + \nu)$ is continuous and non-decreasing, hence so is $h$;
-moreover $h(\nu) \to \pm\infty$ as $\nu \to \pm\infty$. A root therefore exists, and the
-implementation locates it by first bracketing it through geometric expansion of an initial
-interval and then \textbf{bisecting} to a tolerance of $10^{-12}$ on $|h(\nu)|$. Substituting
-$\nu^\star$ back gives the claimed minimizer.
-\end{proof}
+The proof is given in \cref{app:prox}. It runs in four moves: dualize the single affine
+constraint; observe that the Lagrangian then separates across coordinates; solve each
+one-dimensional subproblem in closed form, which is where soft thresholding appears; and
+recover $\nu^\star$ by a one-dimensional root find, which the implementation performs by
+bracketing and \textbf{bisection} to a tolerance of $10^{-12}$. No closed form for $\nu^\star$
+exists, because $h$ is piecewise linear with data-dependent breakpoints.
 
 The two properties that matter hold \emph{simultaneously}, and this is the whole point of
 solving the prox jointly. Every coordinate with $|z_i + \nu^\star| \le t$ is set to
@@ -169,45 +151,5 @@ cannot influence the argmin. The practical consequence is that $\lambda$ is drop
 hyperparameter grid in \cref{sec:backtest}: searching over it would consume compute and change
 nothing. The smooth-plus-robust subgradient \cref{eq:subgrad} is reused unchanged.
 
-\subsection{The algorithm}
-
-\begin{figure}[htbp]
-\centering
-\begin{minipage}{0.92\textwidth}
-\begin{lstlisting}[language={}, basicstyle=\ttfamily\footnotesize, numbers=none,
-                   frame=single, caption={}, label={}]
-Input:  mu_hat, Sigma, Sigma^(1/2), kappa, gamma, lambda,
-        alpha_0 = 10, max_iter = 5000, tol = 1e-8, patience = 100
-w_0     <- (1/N) * 1                      # feasible start: 1'w = 1
-best_obj <- +infinity
-stall    <- 0
-
-for k = 0, 1, 2, ..., max_iter - 1:
-    r <- ||Sigma^(1/2) w_k||_2
-    s <- (Sigma w_k) / r   if r > eps   else   0        # robust subgradient
-    v <- -mu_hat + 2*gamma*(Sigma w_k) + kappa*s        # eq. (7)
-    alpha <- alpha_0 / sqrt(k+1)                        # eq. (9)
-    z <- w_k - alpha*v                                  # subgradient step
-    w_{k+1} <- JointProx(z, t = alpha*lambda)           # Proposition 1
-    f <- objective(w_{k+1})
-    if f < best_obj:
-        rel <- |best_obj - f| / max(|best_obj|, tiny)
-        best_obj <- f;  best_w <- w_{k+1}
-    stall <- stall + 1  if rel < tol  else  0
-    if stall >= patience: break                         # converged
-
-return best_w, best_obj
-
-JointProx(z, t):                                        # Proposition 1
-    bracket nu in [-1, 1], expanding geometrically until
-        h(nu_lo) <= 0 <= h(nu_hi),  where h(nu) = sum_i S_t(z_i + nu) - 1
-    bisect on nu until |h(nu)| < 1e-12
-    return S_t(z + nu*)                    # exact zeros where |z_i+nu*| <= t
-\end{lstlisting}
-\end{minipage}
-\caption{The proximal-subgradient method. \texttt{S\_t} denotes coordinate-wise soft
-thresholding at level $t$. The only nontrivial step is \texttt{JointProx}, which implements
-\cref{prop:jointprox}; replacing it with soft thresholding followed by a separate projection
-reintroduces the bug of \cref{sec:proxbug}.}
-\label{alg:proxsub}
-\end{figure}
+The complete algorithm, including the bracketing and bisection inside \texttt{JointProx}, is
+stated as pseudocode in \cref{alg:proxsub}.
