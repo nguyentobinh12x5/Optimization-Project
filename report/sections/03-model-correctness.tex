@@ -1,1 +1,109 @@
 \section{Model Correctness}\label{sec:correctness}
+
+This section argues that \cref{eq:main} faithfully represents the informal problem of
+\cref{sec:identification}, term by term, and establishes the convexity property that the
+verification strategy of \cref{sec:insample} depends on.
+
+\subsection{The return term}
+
+If $r$ denotes the vector of realized returns, the portfolio return is $w^\top r$ and, by
+linearity of expectation, $\mathbb{E}[w^\top r] = w^\top \mathbb{E}[r] \approx \muhat^\top w$.
+Minimizing $-\muhat^\top w$ is therefore exactly maximizing the estimated expected return of
+the portfolio. Nothing is approximated in the translation from the informal objective to the
+formal one except the estimate $\muhat$ itself --- which is the subject of the next
+subsection.
+
+\subsection{The robust term is derived, not asserted}
+
+Calling a penalty ``robust'' is not an argument. Here the term is derived, and the derivation
+is what justifies its particular form.
+
+Suppose the true mean return vector is not known exactly, but is known to lie in an ellipsoid
+centred on the estimate and shaped by the covariance,
+\begin{equation}\label{eq:uncertainty-set}
+\mathcal{U} = \left\{\, \mu = \muhat + \Ssqrt u \;:\; \norm{u}_2 \le \kappa \,\right\}.
+\end{equation}
+A cautious investor evaluates a portfolio not by its return under the point estimate but by its
+return under the least favourable member of $\mathcal{U}$. That worst case is
+\begin{equation}\label{eq:robust-derivation}
+\max_{\mu \in \mathcal{U}} \; \bigl(-\mu^\top w\bigr)
+ \;=\; -\muhat^\top w + \max_{\norm{u}_2 \le \kappa} \bigl(-u^\top \Ssqrt w\bigr)
+ \;=\; -\muhat^\top w + \kappa \norm{\Ssqrt w}_2 ,
+\end{equation}
+where the final equality is the definition of the dual norm of the Euclidean norm, with the
+maximum attained at $u^\star = -\kappa\,\Ssqrt w / \norm{\Ssqrt w}_2$.
+
+Three consequences follow, and each matters later.
+
+First, the second and third terms of \cref{eq:main} taken together are not a heuristic
+penalty bolted onto a mean--variance objective: the pair
+$-\muhat^\top w + \kappa\norm{\Ssqrt w}_2$ \emph{is} the exact worst-case expected return over
+the uncertainty set \cref{eq:uncertainty-set}. This places the model in the standard robust
+portfolio framework \citep{goldfarb2003} and, more generally, in the robust-counterpart
+machinery of convex optimization \citep{boyd2004}.
+
+Second, the ellipsoid is shaped by $\Ssqrt$ rather than being spherical. Directions in which
+the historical estimate is statistically less reliable --- those with higher variance --- are
+given proportionally more room to move against the portfolio. That is the appropriate shape
+for an uncertainty set describing sampling error in a mean, not an arbitrary choice.
+
+Third, and with consequences that reappear in \cref{sec:insample}, the term
+$\kappa\norm{\Ssqrt w}_2$ is \textbf{positively homogeneous of degree one} in $w$: it is a
+norm, not a squared norm, so scaling $w$ by $c > 0$ scales the term by $c$ rather than $c^2$.
+This structural fact --- forced on the model by the derivation, not chosen for convenience ---
+turns out to explain an empirical result in \cref{sec:insample} that would otherwise look
+simply wrong.
+
+\subsection{The variance term}
+
+The quantity $w^\top \Sig w$ is the variance of the portfolio return under the same
+second-moment estimate, so $\gamma$ is the classical risk-aversion coefficient and
+\cref{eq:main} reduces exactly to Markowitz mean--variance optimization
+\citep{markowitz1952} when $\kappa = \lambda = 0$. That limiting case is a useful sanity check
+on any implementation, since the solution then has a closed form, and it is exercised
+directly by the project's test suite.
+
+\subsection{The sparsity term does two jobs}
+
+What the investor described in \cref{sec:identification} actually wants is a limit on the
+\emph{number} of holdings, that is, a constraint on $\norm{w}_0$. That quantity is nonconvex
+and discontinuous, and imposing it would destroy every guarantee the rest of the model relies
+on --- including the global optimality that makes the verification in \cref{sec:insample}
+meaningful. The term $\lambda\norm{w}_1$ is its standard convex surrogate, the same
+substitution that underlies the Lasso \citep{tibshirani1996} and its established use in
+portfolio construction \citep{brodie2009}.
+
+There is a second effect specific to this problem. Under the budget constraint,
+\begin{equation}\label{eq:leverage}
+\norm{w}_1 \;\ge\; \bigl|\one^\top w\bigr| \;=\; 1 ,
+\end{equation}
+with equality precisely when every $w_i \ge 0$. The quantity $\norm{w}_1$ therefore measures
+\textbf{gross leverage} --- total long exposure plus total short exposure --- and its excess
+over $1$ is exactly twice the short exposure. Because \cref{eq:main} permits short selling,
+this second role is economically meaningful rather than incidental: the same term that
+encourages few holdings also discourages financing large long positions with large short ones.
+The model obtains a leverage control for free from a term introduced for an entirely different
+purpose.
+
+\subsection{Convexity, and why it licenses the cross-check}
+
+Each term of \cref{eq:main} is convex in $w$: $-\muhat^\top w$ is affine;
+$\norm{\Ssqrt w}_2$ is a norm composed with a linear map; $w^\top \Sig w$ is a quadratic form
+with $\Sig \succeq 0$; and $\norm{w}_1$ is a norm. A sum of convex functions with nonnegative
+coefficients is convex, and the feasible set $\{w : \one^\top w = 1\}$ is affine and hence
+convex. Problem \cref{eq:main} is therefore convex, so \textbf{every local minimum is a global
+minimum} and the optimal value is unique.
+
+This is not a decorative observation. It is what makes the verification strategy of
+\cref{sec:insample} a correctness test rather than a comparison of opinions: since the optimal
+value is unique, two solvers that are both correct \emph{must} agree on it, and a disagreement
+is proof that at least one of them is wrong. Without convexity, two solvers reaching different
+answers would be unremarkable.
+
+\medskip
+
+Finally, it is worth being explicit about what the model does not capture. It contains no true
+cardinality constraint, only its convex relaxation; no sector, position, or liquidity limits;
+no market-impact model; and no mechanism for the estimates $\muhat$ and $\Sig$ to be anything
+other than backward-looking sample statistics. These limitations are revisited in
+\cref{sec:conclusion}.
