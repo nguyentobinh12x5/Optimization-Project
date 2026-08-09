@@ -12,6 +12,7 @@
 \usepackage{graphicx}
 \usepackage{xcolor}
 \usepackage{listings}
+\usepackage{tikz}
 
 \graphicspath{{figures/}}
 
@@ -458,6 +459,88 @@ return best_w
     \item Ledoit--Wolf shrinkage; \textbf{0.20\%} transaction cost per unit turnover
     \item Benchmark: \textbf{equal-weight $1/N$}, same schedule, same fees
   \end{itemize}
+\end{frame}
+
+\begin{frame}{Rolling window, concretely: three consecutive periods}
+  \begin{center}
+  \begin{tikzpicture}[x=0.34cm, y=0.85cm, font=\scriptsize]
+    % month axis
+    \draw[->] (0,-0.4) -- (28.5,-0.4) node[right]{month};
+    \foreach \m in {1,6,12,18,24,27} {
+      \draw (\m,-0.45) -- (\m,-0.35);
+      \node[below] at (\m,-0.6) {\m};
+    }
+
+    % Period 1
+    \node[above,font=\tiny\bfseries] at (10,2.65) {Period 1};
+    \draw[fill=blue!25] (1,2.15) rectangle (19,2.65);
+    \node at (10,2.4) {$E$};
+    \draw[fill=orange!35] (19,2.15) rectangle (25,2.65);
+    \node at (22,2.4) {$V$};
+    \draw[fill=green!45] (25,2.15) rectangle (26,2.65);
+    \node[right,font=\tiny] at (26,2.4) {25};
+
+    % Period 2 -- shifted by exactly 1 month
+    \node[above,font=\tiny\bfseries] at (11,1.65) {Period 2};
+    \draw[fill=blue!25] (2,1.15) rectangle (20,1.65);
+    \node at (11,1.4) {$E$};
+    \draw[fill=orange!35] (20,1.15) rectangle (26,1.65);
+    \node at (23,1.4) {$V$};
+    \draw[fill=green!45] (26,1.15) rectangle (27,1.65);
+    \node[right,font=\tiny] at (27,1.4) {26};
+
+    % Period 3 -- shifted by another month
+    \node[above,font=\tiny\bfseries] at (12,0.65) {Period 3};
+    \draw[fill=blue!25] (3,0.15) rectangle (21,0.65);
+    \node at (12,0.4) {$E$};
+    \draw[fill=orange!35] (21,0.15) rectangle (27,0.65);
+    \node at (24,0.4) {$V$};
+    \draw[fill=green!45] (27,0.15) rectangle (28,0.65);
+    \node[right,font=\tiny] at (28,0.4) {27};
+  \end{tikzpicture}
+  \end{center}
+  \vspace{0.1cm}
+  \small
+  \textcolor{blue!55!black}{\rule{0.28cm}{0.28cm}}~Estimation $E$ (18 mo) \quad
+  \textcolor{orange!85!black}{\rule{0.28cm}{0.28cm}}~Validation $V$ (6 mo) \quad
+  \textcolor{green!50!black}{\rule{0.28cm}{0.28cm}}~Deployed month
+
+  \vspace{0.15cm}
+  The window \textbf{slides forward by exactly 1 month} each period: Period 1 and Period 2
+  share \textbf{23 of 24} months of data --- yet $(\kappa,\gamma)$ still swings between periods
+  (next slides). A 6-month validation slice is a noisy yardstick even when the underlying data
+  barely changes.
+\end{frame}
+
+\begin{frame}{Turnover and transaction cost --- worked example}
+  At each rebalance, cost is computed from the \textbf{full} weight vector, compared against
+  the \textbf{drifted} portfolio just before rebalancing --- not last period's target:
+  \[
+    \text{turnover} = \sum_{i=1}^{N} \bigl|w^{\text{new}}_i - w^{\text{prev, drifted}}_i\bigr|
+    \qquad
+    \text{cost} = \text{fee} \times \text{turnover}
+  \]
+  \vspace{0.15cm}
+  \textbf{Example} (2 of the 98 tickers shown; every other ticker unchanged $\Rightarrow$
+  contributes $0$):
+  \begin{center}
+  \begin{tabular}{@{}lcc@{}}
+  \toprule
+   & Ticker A & Ticker B \\
+  \midrule
+  Drifted weight, just before rebalance & 60\% & 40\% \\
+  New target weight, this period        & 30\% & 70\% \\
+  $|\Delta w_i|$                        & 30\% & 30\% \\
+  \bottomrule
+  \end{tabular}
+  \end{center}
+  \[
+    \text{turnover} = |30\%-60\%| + |70\%-40\%| = 30\%+30\% = \good{60\%}
+    \qquad
+    \text{cost} = 0.20\% \times 60\% = \good{0.12\%}
+  \]
+  \small Deducted from the \textbf{first day's} return of the new holding period only --- the
+  portfolio then drifts, untouched, for the rest of the month.
 \end{frame}
 
 \begin{frame}{Backtest results --- 494 days, 25 rebalances}
