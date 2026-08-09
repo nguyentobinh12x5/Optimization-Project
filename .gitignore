@@ -4,5 +4,6 @@ __pycache__/
 *.pyc
 data/
 docs/
-.sddreport-overleaf.zip
+.sdd
+report-overleaf.zip
 slides-overleaf.zip
