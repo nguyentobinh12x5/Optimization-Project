@@ -13,7 +13,9 @@ time $t$ uses only data dated strictly before $t$}.
 
 \begin{itemize}
   \item \textbf{Rolling window.} Each rebalance uses the 24 months immediately preceding it,
-        split into 18 months for estimation ($E$) and the following 6 for validation ($V$).
+        split into 18 months for estimation ($E$) and the following 6 for validation ($V$); the
+        whole window slides forward by exactly 1 month each period (\cref{app:timeline} works a
+        month-numbered example over three periods).
   \item \textbf{Schedule.} Monthly, on the first trading day of each month.
   \item \textbf{Long-only.} The deployed problem adds $w \ge 0$, unlike \cref{eq:main}, since
         the target investor has no short access. As shown in \cref{sec:method}, the simplex
@@ -25,8 +27,10 @@ time $t$ uses only data dated strictly before $t$}.
         fitting; the winner is refitted on $E \cup V$ to give the weights actually deployed.
   \item \textbf{Shrinkage.} Ledoit--Wolf \citep{ledoit2004} throughout, for both selection and
         the deployed fit.
-  \item \textbf{Costs.} $0.20\%$ of turnover per rebalance; the first period carries turnover
-        $1$, the portfolio being bought from cash.
+  \item \textbf{Costs.} $0.20\%$ of turnover per rebalance, where turnover sums the
+        \emph{absolute} weight change across all 98 tickers relative to the drifted portfolio
+        just before rebalancing, not last period's target (\cref{app:timeline} works a numeric
+        example); the first period carries turnover $1$, the portfolio being bought from cash.
   \item \textbf{Benchmark.} Equal-weight $1/N$ on the identical schedule under the identical fee
         formula, so the comparison is like-for-like rather than a fully-costed strategy against a
         frictionless index.

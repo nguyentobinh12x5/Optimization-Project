@@ -180,6 +180,73 @@ contribution to the objective; the remaining weights are exactly zero, not merel
 \label{fig:weights}
 \end{figure}
 
+\section{Walk-Forward Timeline and Transaction-Cost Example}\label{app:timeline}
+
+\subsection{The rolling window, month by month}
+
+\Cref{tab:timeline} makes the rolling-window mechanism of \cref{sec:backtest} concrete by
+numbering months from the start of the available history.
+
+\begin{table}[htbp]
+\centering
+\caption{The rolling window slides forward by exactly one calendar month each period.
+$E$ = estimation, $V$ = validation.}
+\label{tab:timeline}
+\small
+\begin{tabular}{@{}lllll@{}}
+\toprule
+Period & $E$ (18 mo) & $V$ (6 mo) & Refit on & Deploy \\
+\midrule
+1 & months 1--18 & months 19--24 & months 1--24 & month 25 \\
+2 & months 2--19 & months 20--25 & months 2--25 & month 26 \\
+3 & months 3--20 & months 21--26 & months 3--26 & month 27 \\
+$\vdots$ & $\vdots$ & $\vdots$ & $\vdots$ & $\vdots$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Within each period, four steps run in order: (1) fit each of the 12 $(\kappa,\gamma)$
+candidates on $E$; (2) score each by the Sharpe ratio it realizes on $V$, data the fit never
+saw; (3) keep the winning $(\kappa^\star,\gamma^\star)$; (4) re-estimate $\muhat,\Sig$ on the
+full $E \cup V$ (all 24 months) and refit at $(\kappa^\star,\gamma^\star)$ --- these are the
+weights actually deployed for the single next month.
+
+Because the window advances by only 1 month while $E \cup V$ spans 24, \textbf{consecutive
+periods share 23 of 24 months of data} (period 2's window is period 1's window shifted by one
+month). This overlap is worth stating precisely because \cref{sec:backtest} nonetheless finds
+$(\kappa,\gamma)$ swinging between adjacent periods: the instability is not from the windows
+being unrelated, but from a 6-month validation slice being a noisy yardstick even when the
+underlying data barely changes from one period to the next.
+
+\subsection{Turnover and transaction cost, worked example}
+
+At each rebalance, \texttt{src/backtest.py} computes turnover and cost from the full weight
+vector as
+\begin{lstlisting}[language=Python, numbers=none]
+turnover = float(np.abs(w_start - prev).sum())   # sum of |delta w_i| over ALL 98 tickers
+cost     = fee * turnover                        # one multiplication
+\end{lstlisting}
+where \texttt{w\_start} is the new target weight vector for this period and \texttt{prev} is
+the \emph{drifted} portfolio at the close of the previous period --- the weights actually held
+just before rebalancing, after a month of price movement, not the previous period's target.
+This distinction matters: a portfolio that started last month exactly at its target can drift
+several points away from it through price movement alone, and correcting that drift is real
+turnover the investor must pay for.
+
+\textbf{Example.} Suppose two of the 98 tickers have drifted to $60\%$ and $40\%$ of portfolio
+value by the close of the previous period, and the new target for this period is $30\%$ and
+$70\%$ (every other ticker unchanged, contributing $0$ to the sum):
+\begin{equation}
+\text{turnover} = |30\%-60\%| + |70\%-40\%| = 30\% + 30\% = 60\%,
+\qquad
+\text{cost} = 0.20\% \times 60\% = 0.12\%
+\end{equation}
+of portfolio value, deducted from the return of the \emph{first trading day} of the new holding
+period only --- the portfolio then drifts untouched, with no further trading, for the rest of
+the month. For the very first period of the backtest there is no previous portfolio to compare
+against, so \texttt{prev} is treated as all zero and turnover $= \sum_i w_i = 1$ exactly (a full
+purchase from cash), matching the $100\%$ first-period turnover stated in \cref{sec:backtest}.
+
 \section{Backtest Diagnostics}\label{app:backtest}
 
 \begin{figure}[htbp]
