@@ -159,9 +159,39 @@
   chosen by us (\S~Results) or by validation (backtest).
 \end{frame}
 
+\begin{frame}{Why is this \emph{min} convex? Term by term}
+  \[
+    \min_{w \in \R^{98}} \quad
+      \underbrace{-\muhat^\top w}_{\text{(a) affine}}
+      \;+\; \underbrace{\kappa \norm{\Ssqrt w}_2}_{\text{(b) norm}}
+      \;+\; \underbrace{\gamma\, w^\top \Sig w}_{\text{(c) PSD quadratic}}
+      \;+\; \underbrace{\lambda \norm{w}_1}_{\text{(d) norm}}
+    \quad \text{s.t.} \quad \one^\top w = 1
+  \]
+  \small
+  \begin{itemize}
+    \item<2-> \textbf{(a)} $-\muhat^\top w$ is \textbf{linear in $w$} --- linear functions are
+          convex (and concave).
+    \item<3-> \textbf{(b)} $\kappa\norm{\Ssqrt w}_2$ is a \textbf{norm} of a linear map of $w$
+          --- every norm is convex, by the triangle inequality.
+    \item<4-> \textbf{(c)} $\gamma\, w^\top\Sig w$ is a \textbf{quadratic form with
+          $\Sig\succeq0$} (PSD, a covariance matrix) --- convex quadratics are exactly the PSD
+          ones.
+    \item<5-> \textbf{(d)} $\lambda\norm{w}_1$ is a norm too --- convex, same reason as (b).
+    \item<6-> The feasible set $\{w:\one^\top w=1\}$ (and $w\ge0$ for A/B) is
+          \textbf{affine/polyhedral} --- convex.
+  \end{itemize}
+  \onslide<7->{
+  \begin{center}
+  \large A \textbf{nonnegative sum} of convex functions is convex
+  $\Rightarrow$ the whole objective is convex.
+  \end{center}
+  }
+\end{frame}
+
 \begin{frame}{Type of problem $\Rightarrow$ how we solve it}
-  \textbf{Convex.} Every term is convex (affine, norm, PSD quadratic, norm); feasible set is
-  affine $\Rightarrow$ \textbf{every local optimum is global, and unique in value.}
+  \textbf{Convex} (previous slide) $\Rightarrow$ \textbf{every local optimum is global, and
+  unique in value.}
 
   \vspace{0.2cm}
   \textbf{Second-order-cone representable}: an epigraph reformulation turns the two norms into
@@ -232,12 +262,31 @@
     \item Rolling \textbf{24-month} window: 18 months fit + 6 months validate, sliding 1 month
           at a time
     \item \textbf{Monthly} rebalance, \textbf{494 out-of-sample days}, \textbf{25 rebalances}
-    \item All six variants (A--F) fitted on $E$, scored by \textbf{Sharpe} on $V$, refit on
-          $E\cup V$ for deployment
     \item Ledoit--Wolf shrinkage; \textbf{0.20\%} transaction cost per unit turnover
     \item Two benchmarks built from the \emph{same} 98-ticker universe (not an external VN30
           index): C (equal-weight, monthly) and D (VN100 buy\&hold, once)
   \end{itemize}
+\end{frame}
+
+\begin{frame}{Walk-forward, step by step: choosing next month's weights}
+  Within each 24-month window, four steps run in order, for every variant A--F:
+  \begin{enumerate}
+    \item<2-> \textbf{Fit} every hyperparameter candidate in the grid (e.g.\
+          $(\kappa,\gamma)\in\{0,0.5,1,2\}\times\{1,5,10\}$ for A) by solving \cref{eq:main} on
+          $E$ (the 18-month estimation window) for each one.
+    \item<3-> \textbf{Score} each candidate by the \textbf{Sharpe ratio it realizes on $V$}
+          (the 6-month validation window) --- data that candidate's fit never saw.
+    \item<4-> \textbf{Keep} the winning hyperparameters, e.g.\ $(\kappa^\star,\gamma^\star)$.
+    \item<5-> \textbf{Refit and deploy}: re-estimate $\muhat,\Sig$ on the \textbf{full
+          $E\cup V$} (all 24 months) and re-solve \cref{eq:main} at the winning hyperparameters
+          --- the resulting $w^\star$ is what actually \textbf{buys the stocks held for the
+          single next month}.
+  \end{enumerate}
+  \onslide<6->{
+  \vspace{0.2cm}
+  \small The window then slides forward by exactly one month and the whole process repeats ---
+  25 times.
+  }
 \end{frame}
 
 \begin{frame}{Rolling window, concretely: three consecutive periods}

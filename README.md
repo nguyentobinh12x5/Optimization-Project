@@ -1,108 +1,112 @@
 # Sparse + Robust Portfolio Optimization — VN100
 
-Project tối ưu hoá danh mục đầu tư cho rổ **VN100** (98 mã cổ phiếu Việt Nam sau làm
-sạch dữ liệu, 4 năm daily return) theo công thức **sparse + robust mean-variance**:
+A portfolio optimization project for the **VN100** basket (98 Vietnamese stocks after data
+cleaning, 4 years of daily returns) using the **sparse + robust mean-variance** formulation:
 
 ```
 min_w  -μ̂ᵀw + κ‖Σ^(1/2)w‖₂ + γ·wᵀΣw + λ‖w‖₁   s.t.  1ᵀw = 1
 ```
 
-kết hợp 4 mục tiêu trong cùng một bài toán lồi: tối đa hoá return kỳ vọng, phạt rủi ro
-kiểu robust (norm bậc 1 của `Σ^(1/2)w`) và kiểu Markowitz cổ điển (toàn phương), và
-khuyến khích danh mục **thưa** (ít mã nắm giữ) qua phạt L1 — cho phép bán khống (không có
-ràng buộc `w ≥ 0`). Solver chính là một **proximal-subgradient method tự viết bằng numpy
-thuần** (không dùng cvxpy/scipy.optimize/sklearn), với bước prox **chính xác** của
-`L1 + ràng buộc ngân sách` giải bằng bisection (soft-threshold + tìm nhân tử Lagrange `ν`).
-Kết quả được **kiểm chứng chéo** bằng CVXPY (solver nội điểm CLARABEL) như một "ground
-truth" độc lập.
+which combines 4 objectives in a single convex problem: maximizing expected return,
+penalizing risk in both a robust sense (ℓ2-norm of `Σ^(1/2)w`) and a classic Markowitz
+sense (quadratic), and encouraging a **sparse** portfolio (few names held) via an L1
+penalty — short selling is allowed (no `w ≥ 0` constraint). The main solver is a
+**proximal-subgradient method written from scratch in pure numpy** (no cvxpy/
+scipy.optimize/sklearn), with an **exact** prox step for `L1 + budget constraint` solved
+via bisection (soft-thresholding + finding the Lagrange multiplier `ν`). Results are
+**cross-verified** against CVXPY (interior-point solver CLARABEL) as an independent
+"ground truth".
 
-Ngoài phần in-sample trên, project còn có một **walk-forward backtest ngoài mẫu**
-(module `src/backtest.py`): rolling window 24 tháng (18 tháng ước lượng + 6 tháng
-validation), rebalance hàng tháng, long-only (`w≥0, Σw=1`), tự động chọn lại `(κ,γ)` mỗi
-kỳ qua Sharpe validation, có phí giao dịch và so sánh với benchmark equal-weight 1/N — xem
-mục "Walk-forward backtest" bên dưới.
+Beyond the in-sample analysis above, the project also includes an **out-of-sample
+walk-forward backtest** (module `src/backtest.py`): a 24-month rolling window (18 months
+estimation + 6 months validation), monthly rebalancing, long-only (`w≥0, Σw=1`),
+automatic reselection of `(κ,γ)` each period via Sharpe validation, transaction costs, and
+comparison against an equal-weight 1/N benchmark — see the "Walk-forward backtest"
+section below.
 
-Xem `notebook.ipynb` cho câu chuyện đầy đủ end-to-end (dữ liệu → ước lượng → thuật toán →
-kết quả → verify → backtest OOS → kết luận), và thư mục `.sdd/` cho nhật ký thiết kế/báo
-cáo từng phase.
+See `notebook.ipynb` for the full end-to-end story (data → estimation → algorithm →
+results → verification → OOS backtest → conclusion), and the `.sdd/` folder for the
+design log / report of each phase.
 
-## Cấu trúc thư mục
+## Directory structure
 
 ```
 .
-├── src/                    # Logic chính (mọi import của notebook đều từ đây)
-│   ├── data_loader.py      # Tải + làm sạch dữ liệu VN100 qua vnstock, cache ra data/
-│   ├── estimators.py       # Ước lượng μ̂, Σ, Σ^(1/2) (eigh + clip, Ledoit-Wolf tự viết)
-│   ├── prox_solver.py      # Solver proximal-subgradient tự viết (numpy thuần)
-│   ├── cvxpy_check.py      # Kiểm chứng chéo bằng CVXPY (chỉ nơi DUY NHẤT import cvxpy)
-│   ├── backtest.py         # Walk-forward OOS backtest + benchmark equal-weight 1/N
-│   └── viz.py              # 9 hàm vẽ hình (fig1..fig9), lưu ra figures/
-├── tests/                  # pytest cho estimators / prox_solver / cvxpy_check / backtest
-├── data/                   # Cache parquet/csv (returns.parquet, prices.parquet, symbols) — gitignored
-├── figures/                # 9 PNG đã sinh sẵn (fig1_data_overview.png .. fig9_selected_params.png)
-├── notebook.ipynb          # Deliverable end-to-end: import từ src/, chạy sạch từ đầu tới cuối
-├── .sdd/                   # Task brief + report từng phase (nhật ký thiết kế)
-└── .env                    # VNSTOCK_API_KEY (không commit — đã có trong .gitignore)
+├── src/                    # Core logic (all notebook imports come from here)
+│   ├── data_loader.py      # Loads + cleans VN100 data via vnstock, caches to data/
+│   ├── estimators.py       # Estimates μ̂, Σ, Σ^(1/2) (eigh + clip, custom Ledoit-Wolf)
+│   ├── prox_solver.py      # Custom proximal-subgradient solver (pure numpy)
+│   ├── cvxpy_check.py      # Cross-verification via CVXPY (the ONLY place that imports cvxpy)
+│   ├── backtest.py         # Walk-forward OOS backtest + equal-weight 1/N benchmark
+│   └── viz.py               # 9 plotting functions (fig1..fig9), saved to figures/
+├── tests/                  # pytest for estimators / prox_solver / cvxpy_check / backtest
+├── data/                   # Cached parquet/csv (returns.parquet, prices.parquet, symbols) — gitignored
+├── figures/                # 9 pre-generated PNGs (fig1_data_overview.png .. fig9_selected_params.png)
+├── notebook.ipynb          # End-to-end deliverable: imports from src/, runs cleanly start to finish
+├── .sdd/                   # Task briefs + reports for each phase (design log)
+└── .env                    # VNSTOCK_API_KEY (not committed — already in .gitignore)
 ```
 
-## Yêu cầu môi trường
+## Environment requirements
 
-- Python **3.10+** (đã test trên 3.14.5 trong `.venv/`).
-- Package chính: `numpy`, `pandas`, `pyarrow` (đọc/ghi parquet), `matplotlib`, `cvxpy`,
-  `pytest`, `vnstock`, `python-dotenv`, `python-dateutil`, cùng jupyter stack
-  (`ipykernel`, `nbconvert`, `nbformat`) để build/chạy notebook.
-- Đã có sẵn `requirements.txt` (pin phiên bản đã kiểm thử) ở project root — cách cài
-  khuyến nghị là `pip install -r requirements.txt`.
+- Python **3.10+** (tested on 3.14.5 in `.venv/`).
+- Main packages: `numpy`, `pandas`, `pyarrow` (parquet read/write), `matplotlib`, `cvxpy`,
+  `pytest`, `vnstock`, `python-dotenv`, `python-dateutil`, plus the jupyter stack
+  (`ipykernel`, `nbconvert`, `nbformat`) to build/run the notebook.
+- A `requirements.txt` (pinned to tested versions) is provided at the project root — the
+  recommended install method is `pip install -r requirements.txt`.
 
-## Cách chạy
+## How to run
 
 ```bash
-# 1. Tạo & kích hoạt virtualenv
+# 1. Create & activate a virtualenv
 python3 -m venv .venv
-source .venv/bin/activate   # hoặc .venv/bin/python cho từng lệnh không cần activate
+source .venv/bin/activate   # or .venv/bin/python for individual commands without activating
 
-# 2. Cài dependencies (khuyến nghị)
+# 2. Install dependencies (recommended)
 pip install -r requirements.txt
-# hoặc cài trực tiếp:
+# or install directly:
 # pip install numpy pandas pyarrow matplotlib cvxpy pytest vnstock \
 #             python-dotenv python-dateutil ipykernel nbconvert nbformat
 
-# 3. (Chỉ cần nếu chưa có data/*.parquet) Tải + làm sạch dữ liệu VN100
-#    Cần VNSTOCK_API_KEY trong file .env ở project root (không commit file này).
-#    Lần tải ĐẦU TIÊN mất khá lâu (hàng chục phút) do rate-limit free tier của vnstock
-#    (~1.2s sleep giữa mỗi request cho từng mã trong 97+ mã) — CHỈ cần chạy 1 lần,
-#    kết quả được cache ra data/prices.parquet + data/returns.parquet, các lần sau
-#    (kể cả notebook) đọc thẳng từ cache, KHÔNG gọi mạng nữa.
+# 3. (Only needed if data/*.parquet doesn't exist yet) Download + clean VN100 data
+#    Requires VNSTOCK_API_KEY in a .env file at the project root (do not commit this file).
+#    The FIRST download takes a while (tens of minutes) due to vnstock's free-tier rate
+#    limit (~1.2s sleep between requests for each of the 97+ tickers) — only needs to run
+#    ONCE; results are cached to data/prices.parquet + data/returns.parquet, and subsequent
+#    runs (including the notebook) read straight from the cache, with NO further network calls.
 python -m src.data_loader
 
-# 4. Chạy test suite
+# 4. Run the test suite
 pytest tests/ -v
 
-# 5. Mở / chạy notebook
-#    Đăng ký kernel trỏ đúng venv này (chỉ cần làm 1 lần):
+# 5. Open / run the notebook
+#    Register a kernel pointing to this venv (only needs to be done once):
 python -m ipykernel install --user --name optproj-venv --display-name "Python (Optimization Project venv)"
-#    Chạy lại toàn bộ notebook từ đầu (không cần mở Jupyter UI):
+#    Re-run the entire notebook from scratch (no need to open the Jupyter UI):
 python -m nbconvert --to notebook --execute notebook.ipynb --output notebook.ipynb
-#    Hoặc mở tương tác: jupyter notebook notebook.ipynb  (chọn kernel "optproj-venv")
+#    Or open interactively: jupyter notebook notebook.ipynb  (select the "optproj-venv" kernel)
 ```
 
-### Lưu ý môi trường
+### Environment notes
 
-- **`.env` / API key**: `src/data_loader.py` đọc `VNSTOCK_API_KEY` từ file `.env` ở
-  project root qua `python-dotenv` (không log ra key). Nếu `data/*.parquet` đã tồn tại,
-  `main()` đọc thẳng từ cache và **không cần** `.env`/mạng — chỉ cần khi tải lại từ đầu
-  hoặc gọi `repair_universe()`.
-- **SSL / proxy công ty**: nếu máy chạy sau một Cloudflare Zero Trust Gateway (hoặc proxy
-  TLS-inspection tương tự do chính sách quản lý thiết bị của tổ chức), lần gọi mạng tới
-  `vnstock` có thể lỗi `SSL: CERTIFICATE_VERIFY_FAILED — self-signed certificate in
-  certificate chain`. Đây KHÔNG phải lỗi code — cần export root CA của gateway đó từ
-  System Keychain (macOS: `security find-certificate`), gộp vào bundle CA của `certifi`,
-  rồi set biến môi trường `REQUESTS_CA_BUNDLE`/`SSL_CERT_FILE` trỏ tới bundle gộp đó
-  TRƯỚC khi chạy `python -m src.data_loader`. Không cần sửa gì trong `src/data_loader.py`
-  (đây là cấu hình máy/mạng, không phải logic ứng dụng). Xem chi tiết đầy đủ ở
-  `.sdd/task-1b-report.md`.
+- **`.env` / API key**: `src/data_loader.py` reads `VNSTOCK_API_KEY` from a `.env` file at
+  the project root via `python-dotenv` (never logs the key). If `data/*.parquet` already
+  exists, `main()` reads straight from the cache and **does not need** `.env`/network
+  access — this is only needed when reloading from scratch or calling
+  `repair_universe()`.
+- **SSL / corporate proxy**: if the machine runs behind a Cloudflare Zero Trust Gateway
+  (or a similar TLS-inspection proxy enforced by an organization's device management
+  policy), network calls to `vnstock` may fail with `SSL: CERTIFICATE_VERIFY_FAILED —
+  self-signed certificate in certificate chain`. This is NOT a code bug — you need to
+  export that gateway's root CA from the System Keychain (macOS: `security
+  find-certificate`), merge it into `certifi`'s CA bundle, then set the
+  `REQUESTS_CA_BUNDLE`/`SSL_CERT_FILE` environment variables to point at that merged
+  bundle BEFORE running `python -m src.data_loader`. No changes to `src/data_loader.py`
+  are needed (this is machine/network configuration, not application logic). See full
+  details in `.sdd/task-1b-report.md`.
 
-## Kết quả `pytest tests/ -v` (chạy thật, sau khi thêm walk-forward backtest)
+## `pytest tests/ -v` results (real run, after adding the walk-forward backtest)
 
 ```
 ============================= test session starts ==============================
@@ -155,23 +159,24 @@ tests/test_prox_solver.py::test_solve_long_only_returns_best_not_last PASSED [10
 ======================= 40 passed, 27 warnings in 11.99s =======================
 ```
 
-Các `RuntimeWarning` (divide-by-zero/overflow/invalid trong `matmul`) là noise đã biết của
-Apple Accelerate BLAS khi nhân ma trận gần suy biến hoặc trong các test cố ý dựng trường hợp
-biên (`kappa=0`, `Sigma^(1/2)w≈0`) — không phải lỗi, không ảnh hưởng kết quả pass (đã verify
-không có NaN/Inf lọt vào kết quả cuối).
+The `RuntimeWarning`s (divide-by-zero/overflow/invalid in `matmul`) are known noise from
+Apple Accelerate BLAS when multiplying near-singular matrices or in tests that
+deliberately construct edge cases (`kappa=0`, `Sigma^(1/2)w≈0`) — not bugs, and they don't
+affect the passing results (verified that no NaN/Inf leaks into the final output).
 
 ## Notebook
 
-`notebook.ipynb` chạy sạch end-to-end bằng:
+`notebook.ipynb` runs cleanly end-to-end via:
 
 ```bash
 .venv/bin/python -m nbconvert --to notebook --execute notebook.ipynb --output notebook.ipynb
 ```
 
-Kết quả lần chạy thật gần nhất: 28 cell (15 code + 13 markdown), **0 lỗi**, cả **9 hình**
-(`fig1`..`fig9`, gồm 3 hình walk-forward backtest mới) được tái sinh trực tiếp trong
-notebook (gọi hàm trong `src/viz.py`, không đọc PNG tĩnh) và hiển thị inline, tổng thời
-gian thực thi ~50 giây (không gọi mạng — chỉ đọc `data/*.parquet` cache; phần lớn thời gian
-này là walk-forward backtest tự chạy lại grid-search 12 tổ hợp tham số × 25 kỳ rebalance).
-Notebook không copy-paste logic — mọi tính toán import trực tiếp từ `src/data_loader`,
+Result of the most recent real run: 28 cells (15 code + 13 markdown), **0 errors**, all
+**9 figures** (`fig1`..`fig9`, including 3 new walk-forward backtest figures) regenerated
+directly inside the notebook (calling functions in `src/viz.py`, not reading static PNGs)
+and displayed inline, with a total execution time of ~50 seconds (no network calls — only
+reads the `data/*.parquet` cache; most of this time is the walk-forward backtest re-running
+its grid search of 12 parameter combinations × 25 rebalancing periods). The notebook does
+not copy-paste logic — all computation is imported directly from `src/data_loader`,
 `src/estimators`, `src/prox_solver`, `src/cvxpy_check`, `src/backtest`, `src/viz`.
