@@ -1,4 +1,4 @@
-\section{In-Sample Results and Cross-Verification}\label{sec:insample}
+\section{In-Sample Results}\label{sec:insample}
 
 \subsection{Estimating the inputs}
 
@@ -10,57 +10,92 @@ marginally negative eigenvalues, on which Cholesky --- requiring strict positive
 simply fails. The implementation computes $\Sig = V\operatorname{diag}(\ell)V^\top$, clips
 negative $\ell_i$ to zero, and sets $\Ssqrt = V\operatorname{diag}(\sqrt{\ell})V^\top$,
 reconstructing $\Sig$ to $\norm{\Ssqrt\Ssqrt - \Sig}_F / \norm{\Sig}_F = 1.831 \times 10^{-15}$.
+The same near-boundary issue recurs when $\Sig$ is handed to CVXPY: it rejects a covariance
+matrix that is not strictly positive semidefinite in floating point, so the code wraps $\Sig$ in
+\texttt{cp.psd\_wrap} to suppress that check. This relaxes the same numerical tolerance as
+clipping negative eigenvalues above, and does not alter the data passed to the solver.
 
-\subsection{Solver behaviour and the effect of $\lambda$}
+\subsection{Solving the problem, and the effect of $\lambda$}
 
-\Cref{tab:demo} reports two representative solves. In both, $\one^\top w = 1$ holds to
-$10^{-12}$ and the reported zeros are \textbf{exact} zeros produced by the proximal step, not
-small values below a display threshold. That is the practical payoff of \cref{prop:jointprox}:
-the sparsity is real, so the count of nonzero weights is a count of positions the investor would
-actually open.
+Problem \cref{eq:main} is solved directly with CVXPY \citep{diamond2016}, calling CLARABEL
+\citep{clarabel2024} on the conic reformulation \cref{eq:socp}. \Cref{tab:demo} reports two
+representative solves on the full return panel. In both, $\one^\top w = 1$ holds to $10^{-12}$.
+``Active'' means $|w_i| > 10^{-4}$: an interior-point method does not produce exact zeros the way
+a proximal step would, so coordinates it drives toward zero settle in the $10^{-9}$--$10^{-6}$
+range rather than landing on it exactly (the largest such residual across both solves below is
+$8.7\times10^{-6}$, four orders of magnitude below the active threshold) --- so the active count
+is a judgement call at a fixed, generous threshold, not an exact combinatorial statement.
 
 \begin{table}[htbp]
 \centering
-\caption{Two representative solves on the full return panel.}
+\caption{Two representative solves on the full return panel, via CVXPY/CLARABEL.}
 \label{tab:demo}
 \small
 \begin{tabular}{@{}lrrrr@{}}
 \toprule
-$(\kappa,\gamma,\lambda)$ & Iterations & Objective & Active $(|w_i| > 10^{-4})$ & Exact zeros \\
+$(\kappa,\gamma,\lambda)$ & Solver iterations & Objective & Active $(|w_i| > 10^{-4})$ \\
 \midrule
-$(1,\, 5,\, 0.01)$ & 528  & 0.015302 & 17 / 98 & 81 / 98 \\
-$(0,\, 5,\, 0.10)$ & 2113 & 0.099071 & 10 / 98 & 88 / 98 \\
+$(1,\, 5,\, 0.01)$ & 14 & 0.015302 & 17 / 98 \\
+$(0,\, 5,\, 0.10)$ & 11 & 0.099071 & 10 / 98 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \begin{figure}[htbp]
 \centering
-\begin{subfigure}[t]{0.44\textwidth}
-  \centering
-  \includegraphics[width=\textwidth]{fig2_convergence.png}
-  \caption{Objective against iteration count.}
-  \label{fig:convergence}
-\end{subfigure}
-\hfill
-\begin{subfigure}[t]{0.44\textwidth}
-  \centering
-  \includegraphics[width=\textwidth]{fig3_sparsity_path.png}
-  \caption{Active positions against $\lambda$.}
-  \label{fig:sparsity}
-\end{subfigure}
-\caption{Left: convergence; the non-monotone early phase is expected of a subgradient method and
-is why the solver returns the best iterate. Right: the sparsity path.}
-\label{fig:solver}
+\includegraphics[width=0.55\textwidth]{fig3_sparsity_path.png}
+\caption{Active positions against $\lambda$ as it sweeps a logarithmic grid.}
+\label{fig:sparsity}
 \end{figure}
 
 \Cref{fig:sparsity} traces active positions as $\lambda$ sweeps a logarithmic grid. The count
 falls as $\lambda$ rises but \textbf{not strictly monotonically}, for a structural rather than
-numerical reason: $\lambda$ enters only through the threshold $t = \alpha_k\lambda$, and raising
-$t$ also shifts the multiplier $\nu^\star$ enforcing the budget constraint in
-\cref{prop:jointprox}, so a larger $\lambda$ can move $z_i + \nu^\star$ far enough for a
-coordinate to re-enter the active set even as others leave. The trend is unambiguous; the
-monotonicity is not, and the figure is reported as it is rather than smoothed.
+numerical reason: raising the $\ell_1$ weight shifts where the budget constraint $\one^\top w=1$
+binds, so a larger $\lambda$ can move a coordinate's marginal trade-off far enough for it to
+re-enter the active set even as others leave. The trend is unambiguous; the monotonicity is not,
+and the figure is reported as it is rather than smoothed.
+
+\subsection{The effect of \texorpdfstring{$\gamma$}{gamma}}\label{sec:gammasensitivity}
+
+$\gamma$ is the risk-aversion coefficient of \cref{eq:main}: \cref{fig:gammasens} sweeps it over
+$[0.1, 100]$ with $\kappa=\lambda=0$ held fixed (the general, short-selling-permitted model, so
+that the effect of $\gamma$ alone is isolated from the constraints A/B add later), and reports
+the deployed portfolio's expected return $\muhat^\top w^\star$ and volatility
+$\sqrt{w^{\star\top}\Sig w^\star}$ at each value.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.85\textwidth]{fig_gamma_sensitivity.png}
+\caption{Portfolio expected return and volatility as $\gamma$ sweeps $[0.1,100]$ on a log grid,
+$\kappa=\lambda=0$ fixed. Both fall by roughly three orders of magnitude across the sweep.}
+\label{fig:gammasens}
+\end{figure}
+
+Both curves fall monotonically and smoothly --- unlike the $\lambda$ sweep above, there is no
+structural non-monotonicity here, because $\gamma$ enters \cref{eq:main} through a strictly
+convex quadratic rather than a piecewise-linear penalty whose active set can reorganize. At the
+low end ($\gamma=0.1$), with no long-only constraint and no leverage cap, the optimizer is
+willing to take a $137\%$-volatility, $37\%$-expected-daily-return position --- an extreme,
+heavily-levered bet that is only sane in-sample against a fixed $\muhat$, and is the same
+mechanism (small effective risk-aversion, unbounded short-selling) that \cref{sec:ef} later shows
+produces catastrophic losses out of sample. At the high end ($\gamma=100$), both curves flatten
+toward the minimum-variance corner of the mean--variance frontier: return and volatility are both
+small and further increases in $\gamma$ buy little additional risk reduction. The two long-only
+variants tested in \cref{sec:backtest} search $\gamma\in\{1,5,10\}$, a range chosen to sit in the
+steep, sensitive part of this curve rather than either extreme --- consistent with the finding
+there that $\gamma$'s selected value swings between adjacent months rather than settling
+(\cref{sec:results7}): in this steep region, a small shift in the estimated $\muhat,\Sig$ from one
+month to the next can move the validation-optimal $\gamma$ substantially.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.85\textwidth]{fig4_weights_bar.png}
+\caption{Portfolio weights at a small $\lambda$ (denser) against a large $\lambda$ (sparser).
+The large-$\lambda$ portfolio concentrates in the few tickers with the best marginal
+contribution to the objective; the remaining weights are below the $10^{-4}$ active threshold,
+not merely small relative to the active ones.}
+\label{fig:weights}
+\end{figure}
 
 \subsection{The effect of the robust term}
 
@@ -76,52 +111,3 @@ factor, is served more efficiently by concentrating weight along a low-variance 
 few names than by spreading it across many correlated ones. This is an empirical observation on
 one dataset with a plausible mechanism, \emph{not} a theorem about every $\Sig$.
 \Cref{app:robust} gives the figure.
-
-\subsection{Cross-verification against an interior-point solver}
-
-The method of \cref{sec:method} is first-order, hand-written, and specific to this problem.
-CLARABEL \citep{clarabel2024}, invoked through CVXPY \citep{diamond2016}, is a general-purpose
-second-order interior-point solver operating on the conic reformulation \cref{eq:socp}. They
-share no code, no algorithmic family, and no failure modes, and \cref{sec:correctness}
-established that the optimal value is unique --- so two correct solvers must agree on it.
-Agreement on the objective is the weaker test; agreement on the \textbf{active set} is far
-stronger, because the support is a discrete object that a numerically close but structurally
-wrong solution --- such as one from the scheme of \cref{sec:proxbug} --- will generally get wrong
-even while landing near the right objective value. That is exactly how the bug was caught.
-
-\begin{table}[htbp]
-\centering
-\caption{Hand-written solver against CVXPY/CLARABEL. Jaccard $= 1.00$ means the supports are
-identical. The full table, with $\ell_\infty$ weight distances and iteration counts, is in
-\cref{app:verification}.}
-\label{tab:cvxpy}
-\small
-\begin{tabular}{@{}rrrrrrrr@{}}
-\toprule
-$\kappa$ & $\gamma$ & $\lambda$ & $f_{\text{hand}}$ & Rel.\ gap
-  & Active (hand) & Active (CVXPY) & Jaccard \\
-\midrule
-1   & 5  & 0.01  & 0.0153016 & $1.92 \times 10^{-7}$  & 17 & 17 & 1.00 \\
-0   & 5  & 0.10  & 0.0990708 & $7.75 \times 10^{-6}$  & 10 & 10 & 1.00 \\
-1   & 5  & 0.001 & 0.0060877 & $2.44 \times 10^{-7}$  & 39 & 39 & 1.00 \\
-2   & 10 & 0.05  & 0.0607131 & $-1.66 \times 10^{-8}$ & 16 & 16 & 1.00 \\
-0.5 & 1  & 0.02  & 0.0225015 & $1.82 \times 10^{-6}$  & 18 & 18 & 1.00 \\
-1   & 5  & 0     & 0.0045395 & $5.14 \times 10^{-7}$  & 98 & 98 & 1.00 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-The result is unambiguous: the \textbf{maximum relative objective gap is $0.000775\%$} and the
-\textbf{active sets match exactly on all six of six parameter sets}, every run reporting
-convergence; \cref{fig:proxcvx} in \cref{app:verification} shows the individual weights lying on
-the line $y = x$.
-
-The last row is a deliberate control: with $\lambda = 0$ the $\ell_1$ penalty is off and both
-solvers return a fully dense portfolio of 98 active positions. Without it, identical supports
-could in principle reflect nothing more than two methods trivially zeroing the same coordinates;
-the dense case shows the agreement survives when there is no sparsity to agree about.
-
-One detail deserves disclosure. CVXPY rejects a covariance matrix that is not strictly positive
-semidefinite in floating point, so the code wraps $\Sig$ in \texttt{cp.psd\_wrap} to suppress
-that check. This relaxes a numerical tolerance --- the same concession as clipping eigenvalues
-when forming $\Ssqrt$ --- and does not alter the data passed to either solver.

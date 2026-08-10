@@ -267,13 +267,14 @@ def cvxpy_solve_long_only(
     sigma_sqrt: np.ndarray,
     kappa: float,
     gamma: float,
+    max_weight: float | None = None,
 ) -> tuple[np.ndarray, float]:
     """Giải bài toán long-only bằng CVXPY (ground truth).
 
     Formulation KHỚP CHÍNH XÁC với `src.prox_solver.solve_long_only`:
 
         min_w  -mu^T w + kappa*||Sigma^(1/2) w||_2 + gamma*w^T Sigma w
-        s.t.   w >= 0, 1^T w = 1
+        s.t.   w >= 0, 1^T w = 1   [, w <= max_weight nếu được truyền]
 
     KHÔNG có term lam*||w||_1 (xem docstring
     `src.prox_solver.portfolio_objective_long_only` -- dưới long-only,
@@ -281,11 +282,27 @@ def cvxpy_solve_long_only(
     `cp.psd_wrap(sigma)` cùng lý do với `cvxpy_solve` (Sigma ước lượng từ
     dữ liệu thật chỉ PSD tới sai số số học, xem docstring module).
 
+    RÀNG BUỘC `max_weight` (tuỳ chọn, VẪN LỒI -- không phải heuristic):
+    thêm `w <= max_weight` (áp cho MỌI toạ độ) buộc toán học phải phân bổ
+    vào TỐI THIỂU `ceil(1/max_weight)` mã (vì mỗi mã đóng góp tối đa
+    `max_weight` vào tổng=1) -- vd max_weight=0.20 (20%) đảm bảo LUÔN CÓ ÍT
+    NHẤT 5 mã active. Đây là cách kiểm soát tập trung danh mục ĐÚNG NGHĨA
+    (nằm trong khung lồi, nghiệm vẫn là tối ưu toàn cục CHO bài toán đã
+    ràng buộc), khác với cách "lấy top-K rồi chuẩn hoá lại" (heuristic hậu
+    xử lý, không phải nghiệm tối ưu của bài toán đã ràng buộc). LƯU Ý:
+    max_weight chỉ đảm bảo CẬN DƯỚI số mã (>= ceil(1/max_weight)), KHÔNG
+    đảm bảo cận trên tuyệt đối -- số mã thực tế có thể nhiều hơn mức tối
+    thiểu đó tuỳ dữ liệu.
+
     Parameters
     ----------
     mu, sigma, sigma_sqrt : np.ndarray
         Xem `src.prox_solver.portfolio_objective`.
     kappa, gamma : float, hệ số không âm.
+    max_weight : float | None, default None
+        Trần trọng số MỖI mã, trong (0, 1]; None = không ràng buộc (hành vi
+        gốc). Truyền 0.20 để đảm bảo tối thiểu 5 mã, 1/6~=0.1667 cho tối
+        thiểu 6 mã, v.v.
 
     Returns
     -------
@@ -294,7 +311,11 @@ def cvxpy_solve_long_only(
         obj: giá trị hàm mục tiêu tại w, tính lại bằng
              `portfolio_objective_long_only` (CÙNG công thức với solver tay)
              -- KHÔNG dùng trực tiếp `prob.value`, cùng lý do với
-             `cvxpy_solve`.
+             `cvxpy_solve`. LƯU Ý: giá trị này KHÔNG gồm ảnh hưởng của ràng
+             buộc max_weight (portfolio_objective_long_only tính trên công
+             thức gốc) -- chỉ dùng để so sánh objective giữa các w cùng
+             ràng buộc, không so sánh trực tiếp với nghiệm không có
+             max_weight.
     """
     mu = np.asarray(mu, dtype=np.float64)
     sigma = np.asarray(sigma, dtype=np.float64)
@@ -307,7 +328,10 @@ def cvxpy_solve_long_only(
         + kappa * cp.norm(sigma_sqrt @ w, 2)
         + gamma * cp.quad_form(w, cp.psd_wrap(sigma))
     )
-    prob = cp.Problem(cp.Minimize(obj), [w >= 0, cp.sum(w) == 1])
+    constraints = [w >= 0, cp.sum(w) == 1]
+    if max_weight is not None:
+        constraints.append(w <= max_weight)
+    prob = cp.Problem(cp.Minimize(obj), constraints)
 
     solver_used = "CLARABEL"
     try:

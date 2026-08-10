@@ -61,7 +61,7 @@ meaningful rather than incidental: the term that encourages few holdings also di
 financing large long positions with large short ones. The model obtains leverage control for
 free from a term introduced for a different purpose.
 
-\subsection{Convexity, and why it licenses the cross-check}
+\subsection{Convexity, and why it licenses a direct solve}
 
 Each term of \cref{eq:main} is convex: $-\muhat^\top w$ is affine; $\norm{\Ssqrt w}_2$ is a
 norm composed with a linear map; $w^\top\Sig w$ is a quadratic form with $\Sig \succeq 0$; and
@@ -69,10 +69,13 @@ $\norm{w}_1$ is a norm. A nonnegative combination of convex functions is convex,
 $\{w : \one^\top w = 1\}$ is affine and hence convex. Problem \cref{eq:main} is therefore
 convex, so \textbf{every local minimum is global} and the optimal value is unique.
 
-This is not decorative. It is what makes the verification of \cref{sec:insample} a correctness
-test rather than a comparison of opinions: since the optimal value is unique, two correct
-solvers \emph{must} agree on it, and disagreement proves at least one is wrong. Without
-convexity, two solvers reaching different answers would be unremarkable.
+This is not decorative. It is what licenses handing \cref{eq:main} directly to a general-purpose
+interior-point solver (\cref{sec:insample}) rather than deriving a problem-specific algorithm:
+because the problem is convex, and \cref{eq:socp} shows it is second-order-cone representable, a
+solver such as CLARABEL is guaranteed to return the \emph{global} optimum, not merely a point
+where some local-search procedure happened to stop. No independent check of the answer is
+required for that guarantee to hold --- convexity is the guarantee, not a hint that one is
+needed.
 
 Finally, what the model does not capture: no true cardinality constraint, only its relaxation;
 no sector, position, or liquidity limits; no market-impact model; and no mechanism for $\muhat$

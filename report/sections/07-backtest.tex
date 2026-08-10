@@ -4,87 +4,325 @@
 
 \Cref{sec:insample} estimates $\muhat$ and $\Sig$ from the full return panel and then optimizes
 against those same estimates, so $w^\star$ is optimal for data it has already seen. A portfolio
-can look excellent under that procedure purely because $\muhat$ absorbed the noise of that
-particular period, and nothing in the in-sample objective distinguishes that case from genuine
-predictive content. Separating them requires an evaluation in which \textbf{every decision at
-time $t$ uses only data dated strictly before $t$}.
+can look excellent purely because $\muhat$ absorbed the noise of that period, and nothing in the
+in-sample objective distinguishes that from genuine predictive content. Separating them requires
+an evaluation in which \textbf{every decision at time $t$ uses only data dated strictly before
+$t$}.
 
 \subsection{Design}
 
-\begin{itemize}
-  \item \textbf{Rolling window.} Each rebalance uses the 24 months immediately preceding it,
-        split into 18 months for estimation ($E$) and the following 6 for validation ($V$); the
-        whole window slides forward by exactly 1 month each period (\cref{app:timeline} works a
-        month-numbered example over three periods).
-  \item \textbf{Schedule.} Monthly, on the first trading day of each month.
-  \item \textbf{Long-only.} The deployed problem adds $w \ge 0$, unlike \cref{eq:main}, since
-        the target investor has no short access. As shown in \cref{sec:method}, the simplex
-        constraint makes $\norm{w}_1 \equiv 1$, so $\lambda$ cannot affect the solution and is
-        dropped from the search rather than tuned pointlessly.
-  \item \textbf{Hyperparameter selection, per period.} The grid
-        $(\kappa,\gamma) \in \{0, 0.5, 1, 2\} \times \{1, 5, 10\}$ --- twelve combinations --- is
-        fitted on $E$ and scored by Sharpe ratio ($r_f = 0$) on $V$, which was not used for
-        fitting; the winner is refitted on $E \cup V$ to give the weights actually deployed.
-  \item \textbf{Shrinkage.} Ledoit--Wolf \citep{ledoit2004} throughout, for both selection and
-        the deployed fit.
-  \item \textbf{Costs.} $0.20\%$ of turnover per rebalance, where turnover sums the
-        \emph{absolute} weight change across all 98 tickers relative to the drifted portfolio
-        just before rebalancing, not last period's target (\cref{app:timeline} works a numeric
-        example); the first period carries turnover $1$, the portfolio being bought from cash.
-  \item \textbf{Benchmark.} Equal-weight $1/N$ on the identical schedule under the identical fee
-        formula, so the comparison is like-for-like rather than a fully-costed strategy against a
-        frictionless index.
-\end{itemize}
-
-\subsection{Results}
+Each rebalance --- monthly, on the first trading day, 494 out-of-sample days and 25 rebalances in
+total --- uses the trailing 24 months, split into 18 for estimation ($E$) and 6 for validation
+($V$), sliding forward one month at a time, as \cref{tab:timeline} makes concrete
+(\cref{app:timeline} works a full turnover and transaction-cost example).
 
 \begin{table}[htbp]
 \centering
-\caption{Out-of-sample performance over 494 trading days and 25 monthly rebalances.}
-\label{tab:performance}
+\caption{The rolling window slides forward by exactly one calendar month each period.
+$E$ = estimation, $V$ = validation.}
+\label{tab:timeline}
 \small
-\begin{tabular}{@{}lrr@{}}
+\begin{tabular}{@{}lllll@{}}
 \toprule
-\textbf{Metric} & \textbf{Strategy} & \textbf{Equal-weight $1/N$} \\
+Period & $E$ (18 mo) & $V$ (6 mo) & Refit on & Deploy \\
 \midrule
-Cumulative return          & $23.86\%$  & $14.72\%$ \\
-Annualized return          & $11.53\%$  & $7.26\%$ \\
-Annualized volatility      & $28.68\%$  & $19.88\%$ \\
-Sharpe ratio ($r_f = 0$)   & $0.5244$   & $0.4523$ \\
-Maximum drawdown           & $-37.89\%$ & $-20.91\%$ \\
-Total transaction costs    & $3.44\%$   & $0.49\%$ \\
+1 & months 1--18 & months 19--24 & months 1--24 & month 25 \\
+2 & months 2--19 & months 20--25 & months 2--25 & month 26 \\
+3 & months 3--20 & months 21--26 & months 3--26 & month 27 \\
+$\vdots$ & $\vdots$ & $\vdots$ & $\vdots$ & $\vdots$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
+Within each period, four steps run in order: (1) fit each of the 12 $(\kappa,\gamma)$
+candidates on $E$; (2) score each by the Sharpe ratio it realizes on $V$, data the fit never
+saw; (3) keep the winning $(\kappa^\star,\gamma^\star)$; (4) re-estimate $\muhat,\Sig$ on the
+full $E \cup V$ (all 24 months) and refit at $(\kappa^\star,\gamma^\star)$ --- these are the
+weights actually deployed for the single next month. Because the window advances by only 1
+month while $E \cup V$ spans 24, \textbf{consecutive periods share 23 of 24 months of data}
+(period 2's window is period 1's window shifted by one month) --- an overlap worth stating
+precisely because the Interpretation below (\cref{sec:interpretation}) nonetheless finds
+$(\kappa,\gamma)$ swinging between adjacent periods: the instability is not from the windows
+being unrelated, but from a 6-month validation slice being a noisy yardstick even when the
+underlying data barely changes from one period to the next.
+
+\textbf{Six variants} are compared, \textbf{long-only} against \textbf{long-short}: a long-only
+portfolio forbids short positions ($w\ge0$, every ticker held or not held at all), while a
+long-short portfolio allows $w_i<0$, a bet that ticker $i$ falls; and, independently, $\kappa$ free
+against fixed at $0$: \textbf{A} (Robust, long-only, $(\kappa,\gamma)\in\{0,0.5,1,2\}\times
+\{1,5,10\}$), \textbf{B} (Classical, long-only, $\kappa=0$, $\gamma\in\{1,5,10\}$), \textbf{E}
+(Sparse-only, long-short, $\kappa=0$, $(\lambda,\gamma)\in\{0,0.001,0.005,0.01,0.02\}\times
+\{1,5,10\}$), and \textbf{F} (Full equation, long-short, all three free, 60 combinations). A and B
+add $w\ge0$, absent from \cref{eq:main}; the simplex constraint then makes $\norm{w}_1\equiv1$
+(\cref{eq:leverage}), so $\lambda$ is dropped from their search rather than tuned pointlessly ---
+neither, therefore, has an active sparsity term, and any concentration they show is a free
+consequence of the simplex geometry, not a designed effect (\cref{sec:results7}). E fixes $\kappa=0$
+and searches $\lambda$, so its sparsity \emph{is} designed. F searches all three at once. Two
+passive benchmarks, both built from the identical 98-ticker universe rather than an external index
+such as VN30 (a different 30-ticker basket): \textbf{C} rebalances to equal weight $1/N$ on the
+same schedule and fees as A/B; \textbf{D} buys equal weight once and holds, untouched, to the end.
+
+For every variant, its grid is fitted on $E$ and scored by Sharpe ratio ($r_f=0$) on $V$; the
+winner is refitted on $E\cup V$ for the deployed weights. Sharpe, not raw return, is used
+uniformly so the comparison is not an artifact of differing selection criteria. Shrinkage is
+Ledoit--Wolf \citep{ledoit2004} throughout. Costs are $0.20\%$ of turnover per rebalance, turnover
+summing \emph{absolute} weight change against the drifted (not the previous target) portfolio
+(\cref{app:timeline}); the first period carries turnover $1$. All six variants are solved with
+CVXPY/CLARABEL \citep{diamond2016, clarabel2024}, the same solver used throughout
+\cref{sec:insample} --- there is one solver in this project, applied consistently from the
+in-sample results to every walk-forward rebalance, rather than a different implementation per
+section. Each solve completes in roughly a dozen interior-point iterations
+(\cref{sec:insample}), so a grid search re-solving the problem 12--60 times per rebalance across
+25 rebalances still runs in well under a minute.
+
+\subsection{Results}\label{sec:results7}
+
+\Cref{tab:methods} runs the design of the previous section exactly as stated, with no constraint
+beyond \cref{eq:main} itself (long-only A/B add only $w\ge0$; \cref{sec:cap} below adds a second
+constraint to A and B and revisits these numbers). \textbf{Column definitions:} \textbf{CumRet},
+total compounded return over the 494-day out-of-sample period; \textbf{AnnRet}, CumRet
+annualized as $(1+\text{CumRet})^{252/n_{\text{days}}}-1$ (floored at $-100\%$ when a method is
+wiped out, since the base of that power would otherwise be negative); \textbf{Vol}, annualized
+standard deviation of daily net returns, $\sigma_{\text{daily}}\sqrt{252}$; \textbf{Sharpe},
+AnnRet$/$Vol at $r_f=0$; \textbf{MaxDD}, the largest peak-to-trough decline in cumulative equity
+over the period. All figures are net of the $0.20\%$-of-turnover transaction cost.
+
+\begin{table}[htbp]
+\centering
+\caption{Out-of-sample performance, 494 trading days / 25 monthly rebalances, all six variants,
+no constraint beyond \cref{eq:main} (A, B: $w\ge0$ only).}
+\label{tab:methods}
+\small
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+\textbf{Method} & \textbf{CumRet} & \textbf{AnnRet} & \textbf{Vol} & \textbf{Sharpe} & \textbf{MaxDD} \\
+\midrule
+A: Robust Markowitz (long-only)     & $37.7\%$   & $17.7\%$   & $30.9\%$  & $0.68$ & $-39.7\%$ \\
+B: Classical Markowitz (long-only)  & $\mathbf{74.2\%}$ & $\mathbf{32.7\%}$ & $31.6\%$ & $\mathbf{1.05}$ & $-39.7\%$ \\
+C: Equal-weight $1/N$                       & $14.7\%$   & $7.3\%$    & $19.9\%$  & $0.45$ & $-20.9\%$ \\
+D: VN100 buy\&hold                          & $21.5\%$   & $10.4\%$   & $20.1\%$  & $0.59$ & $\mathbf{-20.4\%}$ \\
+E: Sparse-only (long-short)                 & $-100.0\%$ & $-100.0\%$ & $245.5\%$ & $0.55$ & $-100.0\%$ \\
+F: Full equation (long-short)               & $-100.0\%$ & $-100.0\%$ & $240.8\%$ & $0.42$ & $-100.0\%$ \\
+\bottomrule
+\end{tabular}
+
+\end{table}
+
+\begin{minipage}{\textwidth}
+\small
+\textbf{What each method actually solves.} Each variant below is \cref{eq:main} with certain
+terms fixed or dropped, plus, for A/B only, the concentration constraint of \cref{sec:cap}; C and
+D solve no optimization problem at all.
+
+\textbf{A} (robust, long-only) --- $\kappa$ and $\gamma$ searched, $\lambda\equiv0$ (vacuous under
+the simplex, \cref{eq:leverage}):
+{\footnotesize
+\[
+\min_{w\ge0,\ \mathbf1^\top w=1}\ -\muhat^\top w
+  \;+\; \underbrace{\kappa\norm{\Ssqrt w}_2}_{\text{robustness}}
+  \;+\; \underbrace{\gamma\, w^\top\Sig w}_{\text{variance}}
+\]
+}
+
+\textbf{B} (classical, long-only) --- $\kappa\equiv0$ (robust term off), $\gamma$ searched,
+$\lambda\equiv0$ (same vacuity as A: B is exactly A with the robust term switched off, nothing
+else differs):
+{\footnotesize
+\[
+\min_{w\ge0,\ \mathbf1^\top w=1}\ -\muhat^\top w
+  \;+\; \underbrace{\gamma\, w^\top\Sig w}_{\text{variance}}
+\]
+}
+
+\textbf{C} (equal-weight $1/N$) and \textbf{D} (VN100 buy\&hold) --- $w_i = 1/N$ for every $i$, no
+objective solved: C resets to $1/N$ every month, D sets it once and lets it drift untouched.
+
+\textbf{E} (sparse-only, long-short) --- $\kappa\equiv0$ (robust off), $\gamma$ searched, $\lambda$
+searched over a real grid, the only variant where sparsity is a \emph{designed} choice rather than
+a byproduct:
+{\footnotesize
+\[
+\min_{\mathbf1^\top w=1}\ -\muhat^\top w
+  \;+\; \underbrace{\gamma\, w^\top\Sig w}_{\text{variance}}
+  \;+\; \underbrace{\lambda\norm{w}_1}_{\text{sparsity / leverage}}
+\]
+}
+
+\textbf{F} (full equation, long-short) --- $\kappa$, $\gamma$, $\lambda$ all searched:
+\cref{eq:main} exactly as stated, no term fixed and no exposure constraint added, which
+\cref{sec:ef} shows is precisely the combination that fails:
+{\footnotesize
+\[
+\min_{\mathbf1^\top w=1}\ -\muhat^\top w
+  \;+\; \underbrace{\kappa\norm{\Ssqrt w}_2}_{\text{robustness}}
+  \;+\; \underbrace{\gamma\, w^\top\Sig w}_{\text{variance}}
+  \;+\; \underbrace{\lambda\norm{w}_1}_{\text{sparsity / leverage}}
+\]
+}
+\end{minipage}
+
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.58\textwidth]{fig7_backtest_equity.png}
-\caption{Out-of-sample equity curves, net of transaction costs.}
-\label{fig:equity}
+\includegraphics[width=0.82\textwidth]{fig10a_6method_equity.png}
+\caption{Cumulative equity, all six methods as run above, net of fees: A/B/C/D stay within a
+narrow band while E and F swing sharply before both collapsing to zero around mid-2025
+(\cref{sec:ef} traces the mechanism and the exact date).}
+\label{fig:equity6}
 \end{figure}
 
-\subsection{Interpretation}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.82\textwidth]{fig10b_6method_drawdown.png}
+\caption{Drawdown over time for the same six methods and period as \cref{fig:equity6}: A/B/C/D
+stay bounded while E and F both fall to $-100\%$ and remain there once wiped out.}
+\label{fig:drawdown6}
+\end{figure}
 
-\textbf{The win is real.} The strategy beats equal-weight $1/N$ on both cumulative return and
-Sharpe ratio --- not a foregone conclusion, since $1/N$ is a notoriously difficult baseline and
-the finding that optimized portfolios routinely fail to beat it out of sample is well established
-\citep{demiguel2009}. A loss would have been reported just as readily: the backtest was built
-before its outcome was known.
+\subsection{A concentration problem, and a constraint to fix it}\label{sec:cap}
 
-\textbf{The win is narrow, and it is paid for.} Volatility is roughly $44\%$ higher than the
-benchmark's ($28.68\%$ against $19.88\%$) and the maximum drawdown about $1.8$ times deeper
-($-37.89\%$ against $-20.91\%$). The Sharpe ratio already nets this out, so the risk-adjusted
-edge ($0.5244$ against $0.4523$) is genuine --- but it is modest, and an investor experiences the
-drawdown directly rather than experiencing the Sharpe ratio.
+A and B already beat both benchmarks in \cref{tab:methods}. But the \emph{number of names held}
+swings wildly from month to month --- B's trace (\cref{tab:bmonthly}) ranges from $1$ to $14$,
+mean $7.56$, and in February 2025 the entire portfolio concentrated in a single ticker on the
+strength of its trailing 24-month sample mean and lost $9.47\%$ the following month when that edge
+did not persist. Nothing in \cref{eq:main} stops this: a long-only quadratic program's KKT
+conditions place the optimum at a vertex or a low-dimensional face of the simplex, with no floor
+on how many names that face touches.
 
-\textbf{Costs are the binding practical problem.} Total fees are about seven times the
-benchmark's ($3.44\%$ against $0.49\%$) over the same 25 rebalances, driven by average monthly
-turnover near $69\%$. The cause is diagnosable: because $(\kappa,\gamma)$ is re-selected every
-period against a short and therefore noisy six-month validation window, $\gamma$ swings across
-$\{1, 5, 10\}$ between consecutive months without settling, and each swing rewrites the target
-portfolio wholesale. A secondary observation from the same record is that $\kappa$ is selected as
-$0$ in most periods: a short-horizon Sharpe criterion rarely rewards the robust term on this
-data, consistent with robustness protecting against tail scenarios a two-year sample may not
-contain. Against a raw cumulative return advantage of roughly nine percentage points, three
-points of fees --- before slippage or market impact --- consumes a material share of the gain.
+\begin{table}[htbp]
+\centering
+\caption{Method B (uncapped), active positions by month --- the trace behind the constraint added
+below. Mean $7.56$, range $1$--$14$.}
+\label{tab:bmonthly}
+\small
+\begin{tabular}{@{}lr@{\hspace{18pt}}lr@{\hspace{18pt}}lr@{}}
+\toprule
+Month & $n$ & Month & $n$ & Month & $n$ \\
+\midrule
+2024-07 & 12 & 2025-02 & 1  & 2025-09 & 14 \\
+2024-08 & 10 & 2025-03 & 2  & 2025-10 & 2  \\
+2024-09 & 9  & 2025-04 & 2  & 2025-11 & 9  \\
+2024-10 & 9  & 2025-05 & 3  & 2025-12 & 3  \\
+2024-11 & 7  & 2025-06 & 12 & 2026-01 & 10 \\
+2024-12 & 12 & 2025-07 & 10 & 2026-02 & 11 \\
+2025-01 & 12 & 2025-08 & 12 & 2026-03 & 4  \\
+        &    &         &    & 2026-04 & 2  \\
+        &    &         &    & 2026-05 & 7  \\
+        &    &         &    & 2026-06 & 6  \\
+        &    &         &    & 2026-07 & 8  \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Adding a constraint an investor would actually want.} A real investor generally wants a
+portfolio that always holds at least a handful of names, both to limit the damage from any single
+estimate being wrong and because a one-ticker "portfolio" is not diversification by any reasonable
+definition. Rather than hard-code a single cap, we parameterize it by $K$, the minimum number of
+names the investor wants held at once --- a choice the investor makes, not the model --- and add
+to \cref{eq:main}, for A and B only,
+\begin{equation}\label{eq:capk}
+w_i \le \frac{1}{K}, \qquad i = 1,\dots,N,
+\end{equation}
+applied identically during selection and deployment (the underlying solver,
+\texttt{cvxpy\_solve\_long\_only} in \texttt{src/cvxpy\_check.py}, already exposes this as a free
+\texttt{max\_weight} argument equal to $1/K$, rather than a number hard-coded into the objective).
+This is a genuine convex constraint, not a heuristic --- with $\sum_i w_i=1$ and no weight above
+$1/K$, at least $K$ names are mathematically guaranteed to hold positive weight (not, however, an
+upper bound on how many are held). $K$ is a dial an investor turns to taste: $K=5$ gives a $20\%$
+per-name cap, $K=10$ tightens it to $10\%$, and so on, trading a lower floor on diversification
+against more freedom for the optimizer to concentrate in its best-ranked names. Every number
+reported from here on uses $K=5$ ($w_i\le20\%$), the setting used throughout this report; once
+added, realized counts range $5$--$20$, mean $12.3$, for A and $5$--$15$, mean $10.4$, for B.
+\Cref{tab:beforeafter} compares A and B with and without it; C, D, E, F are untouched by this
+constraint and keep the values already reported in \cref{tab:methods}.
+
+\begin{table}[htbp]
+\centering
+\caption{A and B, uncapped (\cref{tab:methods}) against capped at $20\%$/ticker.}
+\label{tab:beforeafter}
+\small
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+\textbf{Method} & \textbf{CumRet} & \textbf{AnnRet} & \textbf{Vol} & \textbf{Sharpe} & \textbf{MaxDD} \\
+\midrule
+A, uncapped         & $37.7\%$ & $17.7\%$ & $30.9\%$ & $0.68$ & $-39.7\%$ \\
+A, capped $20\%$    & $56.8\%$ & $25.8\%$ & $21.3\%$ & $1.19$ & $-25.0\%$ \\
+B, uncapped         & $74.2\%$ & $32.7\%$ & $31.6\%$ & $1.05$ & $-39.7\%$ \\
+B, capped $20\%$    & $\mathbf{76.3\%}$ & $\mathbf{33.6\%}$ & $22.8\%$ & $\mathbf{1.39}$ & $-25.0\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The cap does not merely trade return for lower risk, the usual effect of a constraint --- here
+return \emph{rises} for both A and B while volatility and drawdown both fall by roughly a third,
+because the constraint does not discourage the concentrated bets that hurt performance, it makes
+them infeasible. From here on, "A" and "B" refer to the capped variant unless stated otherwise.
+
+\subsection{A cautionary extension: long-short without a leverage constraint}\label{sec:ef}
+
+E and F keep \cref{eq:main} exactly as stated --- short positions allowed, no bound on
+$\norm{w}_1$ beyond the soft $\lambda$ penalty --- and both are wiped out
+(\cref{fig:equity6,fig:drawdown6}). Gross exposure is unbounded whenever the grid selects a small or zero
+$\lambda$, which it did repeatedly: a cheaply-leveraged combination can look almost risk-free
+against a shrinkage-smoothed but still noisy $\hat\Sigma$ without being risk-free out of sample.
+On F's worst day (2025-06-02), no individual ticker moved more than $\pm7\%$, yet a portfolio of
+$49$ positions above $100\%$ of capital each (gross exposure $133\times$) lost $39\%$ in that one
+session --- a few such sessions inside an un-rebalanced month are enough to breach $-100\%$, at
+which point \texttt{\_simulate\_period} floors the loss and marks the remainder of the month at
+$0\%$. The pattern recurred for both E and F across independent periods: a structural consequence
+of selecting $(\lambda,\gamma)$, and for F $\kappa$ too, by validation Sharpe with no cap on
+$\norm{w}_1$ anywhere. The natural fix, a hard leverage cap $\norm{w}_1\le L$, is a different
+constraint shape from A/B's per-ticker cap and is left for future work (\cref{sec:conclusion})
+rather than a same-day patch --- the point of this section is the negative result: a per-position
+weight cap, effective for A/B, would \emph{not} address this failure, because the pathology is
+\emph{total} exposure, not concentration in one name.
+
+\subsection{Interpretation}\label{sec:interpretation}
+
+\textbf{The robust term does not earn its keep, out of sample as well as in-sample.} A and B
+differ only in whether $\kappa$ is searched or fixed at $0$, under an identical selection
+criterion and concentration cap. B's Sharpe ($1.39$) exceeds A's ($1.19$), and A's own search picks
+$\kappa=0$ in $18$ of $25$ periods. This corroborates \cref{sec:insample} out of sample: because
+$\kappa\norm{\Ssqrt w}_2$ pulls with constant magnitude regardless of scale, it behaves like a
+second, competing objective rather than a caution dial, and on this universe that trade
+consistently loses.
+
+\textbf{Both long-only variants beat both passive benchmarks}, so the naive-diversification result
+of \citet{demiguel2009} does not hold here, though not for free: B's volatility and drawdown still
+exceed both benchmarks', and its fees ($2.15\%$, turnover $42.9\%$/month) and A's ($3.00\%$,
+$60.1\%$) run $4$--$6\times$ C's ($0.49\%$) and dwarf D's single purchase. \Cref{fig:selectedparams}
+shows the cause: $\gamma$ still swings across $\{1,5,10\}$ between adjacent months without
+settling --- the cap bounds how concentrated a period's portfolio can be, not how much it changes
+from the last one, the same short-validation-window instability flagged in \cref{sec:conclusion}.
+
+\textbf{Should this cost be inside the optimization instead of outside it?} Every number above
+treats transaction cost as a friction applied \emph{after} $w^\star$ is chosen ---
+\cref{eq:main} has no term that sees $w_{\text{prev}}$ at all, so the optimizer that picks
+$\gamma=1$ this month has no way to know that doing so will force a $60\%$ turnover against last
+month's holdings. The natural alternative is to add a turnover penalty
+$\eta\norm{w-w_{\text{prev}}}_1$ directly to \cref{eq:main} at each rebalance, letting the
+optimizer trade expected return against \emph{both} risk and rebalancing cost simultaneously,
+which is the standard treatment in the transaction-cost portfolio literature. Three reasons this
+report keeps cost as a post-hoc evaluation deduction instead: first, \cref{eq:main} is stated and
+solved once in \cref{sec:insample} as a single-period problem, and $w_{\text{prev}}$ is
+meaningful only in the multi-period walk-forward setting of this section --- folding it in would
+mean the core model of \cref{sec:modeling} is no longer the same model actually deployed, which
+this report's structure deliberately avoids. Second, $\eta$ would be a fourth hyperparameter
+selected on the same six-month validation window already shown (\cref{sec:results7},
+\cref{fig:selectedparams}) to select $\gamma$ unstably --- adding a cost-aware term without first
+fixing that instability risks fitting $\eta$ to six months of noise rather than to a genuine
+cost--return trade-off. Third, and most concretely, the concentration cap of \cref{sec:cap} was
+added \emph{because} of a diversification concern (\cref{tab:bmonthly}), not a cost concern, yet
+it happens to cut A's and B's turnover as a side effect --- keeping cost external to
+\cref{eq:main} keeps that attribution clean: \cref{tab:beforeafter}'s improvement is
+demonstrably from the cap, not confounded with a simultaneously-tuned cost penalty. A cost-aware
+variant, $\eta\norm{w-w_{\text{prev}}}_1$ added once the $\gamma$-selection instability above is
+addressed, is accordingly left as the natural next extension rather than folded in here.
+
+\textbf{The long-short extension is the sharpest lesson here.} E and F are not merely worse than
+A--D, they are categorically different, because nothing in their formulation bounds total leverage
+the way the long-only constraint set implicitly does. This is not a critique of allowing $\lambda$
+or short positions in principle --- \cref{eq:main} still permits both, deliberately --- it is
+evidence that a search selecting parameters by short-window validation performance, with no
+leverage constraint anywhere in the objective, will occasionally select an unbounded one, and
+unbounded leverage combined with ordinary daily volatility is catastrophic regardless of how
+well-motivated the underlying convex program is.

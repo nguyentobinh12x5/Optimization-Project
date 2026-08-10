@@ -34,87 +34,6 @@ defect rather than on the calendar. The threshold is deliberately high: genuine 
 flat days are possible in principle, and a lower threshold risks discarding real sessions. As
 noted in \cref{sec:data}, this filter removes no rows from the present panel.
 
-\section{The Joint Proximal Operator}\label{app:prox}
-
-This appendix gives the proof of \cref{prop:jointprox} and the full algorithm statement.
-
-\subsection{Proof of \texorpdfstring{\cref{prop:jointprox}}{Proposition 1}}
-
-\begin{proof}
-The objective is strongly convex and the constraint affine, so the minimizer exists, is unique,
-and strong duality holds. Introduce a multiplier $\nu$ for the budget constraint:
-\[
-  L(w,\nu) = \tfrac12\norm{w-z}_2^2 + t\norm{w}_1 - \nu\bigl(\one^\top w - 1\bigr)
-           = \sum_{i=1}^{N}\Bigl[\tfrac12 (w_i - z_i)^2 + t|w_i| - \nu w_i\Bigr] + \nu .
-\]
-For fixed $\nu$ the Lagrangian \emph{separates across coordinates}: each bracketed summand
-involves only $w_i$. Completing the square in the smooth part,
-\[
-  \tfrac12 (w_i - z_i)^2 - \nu w_i
-  = \tfrac12\bigl(w_i - (z_i + \nu)\bigr)^2 - \nu z_i - \tfrac{\nu^2}{2},
-\]
-so minimizing the $i$-th summand is exactly evaluating the scalar proximal operator of
-$t|\cdot|$ at the shifted point $z_i + \nu$, whose closed form is soft thresholding:
-$w_i(\nu) = \softt_t(z_i + \nu)$.
-
-It remains to choose $\nu$ so that the primal constraint holds, that is, to solve $h(\nu) = 0$
-where $h(\nu) = \sum_i \softt_t(z_i+\nu) - 1$. Each map
-$\nu \mapsto \softt_t(z_i + \nu)$ is continuous and non-decreasing, hence so is $h$; moreover
-$h(\nu) \to \pm\infty$ as $\nu \to \pm\infty$, since for $|\nu|$ large every coordinate is
-outside the threshold band and $h$ grows linearly with slope $N$. A root therefore exists.
-There is no closed form for it --- $\softt_t$ is piecewise linear with a flat segment, so
-$h$ is piecewise linear with data-dependent breakpoints --- and the implementation locates the
-root by bracketing it through geometric expansion of an initial interval and then bisecting to
-a tolerance of $10^{-12}$ on $|h(\nu)|$. Substituting $\nu^\star$ back into
-$w_i = \softt_t(z_i + \nu^\star)$ gives the claimed minimizer, which is unique by strong
-convexity.
-\end{proof}
-
-\subsection{The full algorithm}
-
-\begin{figure}[htbp]
-\centering
-\begin{minipage}{0.95\textwidth}
-\begin{lstlisting}[language={}, basicstyle=\ttfamily\footnotesize, numbers=none,
-                   frame=single]
-Input:  mu_hat, Sigma, Sigma^(1/2), kappa, gamma, lambda,
-        alpha_0 = 10, max_iter = 5000, tol = 1e-8, patience = 100
-w_0      <- (1/N) * 1                     # feasible start: 1'w = 1
-best_obj <- +infinity
-stall    <- 0
-
-for k = 0, 1, 2, ..., max_iter - 1:
-    r <- ||Sigma^(1/2) w_k||_2
-    s <- (Sigma w_k) / r   if r > eps   else   0        # robust subgradient
-    v <- -mu_hat + 2*gamma*(Sigma w_k) + kappa*s        # subgradient of f
-    alpha <- alpha_0 / sqrt(k+1)                        # step size
-    z <- w_k - alpha*v                                  # subgradient step
-    w_{k+1} <- JointProx(z, t = alpha*lambda)           # Proposition 1
-    f <- objective(w_{k+1})
-    if f < best_obj:
-        rel <- |best_obj - f| / max(|best_obj|, tiny)
-        best_obj <- f;  best_w <- w_{k+1}
-    stall <- stall + 1  if rel < tol  else  0
-    if stall >= patience: break                         # converged
-
-return best_w, best_obj
-
-JointProx(z, t):                                        # Proposition 1
-    bracket nu in [-1, 1], expanding geometrically until
-        h(nu_lo) <= 0 <= h(nu_hi),  h(nu) = sum_i S_t(z_i + nu) - 1
-    bisect on nu until |h(nu)| < 1e-12
-    return S_t(z + nu*)                    # exact zeros where |z_i+nu*| <= t
-\end{lstlisting}
-\end{minipage}
-\caption{The proximal-subgradient method of \cref{sec:method}. \texttt{S\_t} denotes
-coordinate-wise soft thresholding at level $t$. The only nontrivial step is
-\texttt{JointProx}; replacing it with soft thresholding followed by a separate projection onto
-$\{\one^\top w = 1\}$ reintroduces the bug analysed in \cref{sec:proxbug}. For the long-only
-variant of \cref{sec:backtest}, \texttt{JointProx} is replaced by Euclidean projection onto the
-probability simplex and the $\lambda$ argument disappears.}
-\label{alg:proxsub}
-\end{figure}
-
 \section{The Effect of the Robust Term}\label{app:robust}
 
 \begin{figure}[htbp]
@@ -127,98 +46,11 @@ more diversified. The mechanism --- degree-one homogeneity of the robust term --
 \label{fig:robust}
 \end{figure}
 
-\section{Full Cross-Verification Results}\label{app:verification}
+\section{Transaction-Cost Worked Example}\label{app:timeline}
 
-\Cref{tab:cvxpyfull} is the complete comparison summarized in \cref{tab:cvxpy}. The additional
-columns are $f_{\text{cvx}}$, the objective attained by CVXPY/CLARABEL; $\ell_\infty$, the
-largest absolute difference between corresponding weights of the two solutions; the iteration
-count of the hand-written solver; and its convergence flag.
-
-The $\ell_\infty$ column is worth a comment, because it is the one place the two solutions
-differ visibly. The largest weight discrepancy, $1.65 \times 10^{-2}$, occurs for
-$(\kappa,\gamma,\lambda) = (0, 5, 0.1)$ --- the sparsest and slowest-converging case, at 2113
-iterations. Even there the objective gap is $7.75 \times 10^{-6}$ relative and the active sets
-are identical. This is the expected signature of a first-order method halted at a finite
-tolerance on a problem whose objective is flat near the optimum along certain directions: the
-optimal value is pinned down far more precisely than the individual coordinates that attain it.
-
-\begin{table}[htbp]
-\centering
-\caption{Complete cross-verification results across the parameter grid.}
-\label{tab:cvxpyfull}
-\footnotesize
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{@{}rrrrrrrrrrrl@{}}
-\toprule
-$\kappa$ & $\gamma$ & $\lambda$ & $f_{\text{hand}}$ & $f_{\text{cvx}}$ & Rel.\ gap
- & Act.\ h & Act.\ c & Jac. & $\ell_\infty$ & Iter. & Conv. \\
-\midrule
-1   & 5  & 0.01  & 0.0153016  & 0.0153016  & $1.92013\times10^{-7}$  & 17 & 17 & 1 & $5.65307\times10^{-4}$ & 528  & True \\
-0   & 5  & 0.1   & 0.0990708  & 0.0990700  & $7.75485\times10^{-6}$  & 10 & 10 & 1 & $1.65268\times10^{-2}$ & 2113 & True \\
-1   & 5  & 0.001 & 0.00608767 & 0.00608766 & $2.44160\times10^{-7}$  & 39 & 39 & 1 & $4.02373\times10^{-4}$ & 623  & True \\
-2   & 10 & 0.05  & 0.0607131  & 0.0607131  & $-1.66054\times10^{-8}$ & 16 & 16 & 1 & $9.56913\times10^{-5}$ & 222  & True \\
-0.5 & 1  & 0.02  & 0.0225015  & 0.0225015  & $1.81833\times10^{-6}$  & 18 & 18 & 1 & $3.03393\times10^{-3}$ & 1302 & True \\
-1   & 5  & 0     & 0.00453947 & 0.00453947 & $5.14487\times10^{-7}$  & 98 & 98 & 1 & $4.06260\times10^{-4}$ & 782  & True \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.5\textwidth]{fig6_prox_vs_cvxpy.png}
-\caption{Weights from the hand-written solver against those from CVXPY/CLARABEL, for a parameter
-set with $\lambda > 0$. The points lie on the line $y = x$.}
-\label{fig:proxcvx}
-\end{figure}
-
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.9\textwidth]{fig4_weights_bar.png}
-\caption{Portfolio weights at a small $\lambda$ (denser) against a large $\lambda$ (sparser).
-The large-$\lambda$ portfolio concentrates in the few tickers with the best marginal
-contribution to the objective; the remaining weights are exactly zero, not merely small.}
-\label{fig:weights}
-\end{figure}
-
-\section{Walk-Forward Timeline and Transaction-Cost Example}\label{app:timeline}
-
-\subsection{The rolling window, month by month}
-
-\Cref{tab:timeline} makes the rolling-window mechanism of \cref{sec:backtest} concrete by
-numbering months from the start of the available history.
-
-\begin{table}[htbp]
-\centering
-\caption{The rolling window slides forward by exactly one calendar month each period.
-$E$ = estimation, $V$ = validation.}
-\label{tab:timeline}
-\small
-\begin{tabular}{@{}lllll@{}}
-\toprule
-Period & $E$ (18 mo) & $V$ (6 mo) & Refit on & Deploy \\
-\midrule
-1 & months 1--18 & months 19--24 & months 1--24 & month 25 \\
-2 & months 2--19 & months 20--25 & months 2--25 & month 26 \\
-3 & months 3--20 & months 21--26 & months 3--26 & month 27 \\
-$\vdots$ & $\vdots$ & $\vdots$ & $\vdots$ & $\vdots$ \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Within each period, four steps run in order: (1) fit each of the 12 $(\kappa,\gamma)$
-candidates on $E$; (2) score each by the Sharpe ratio it realizes on $V$, data the fit never
-saw; (3) keep the winning $(\kappa^\star,\gamma^\star)$; (4) re-estimate $\muhat,\Sig$ on the
-full $E \cup V$ (all 24 months) and refit at $(\kappa^\star,\gamma^\star)$ --- these are the
-weights actually deployed for the single next month.
-
-Because the window advances by only 1 month while $E \cup V$ spans 24, \textbf{consecutive
-periods share 23 of 24 months of data} (period 2's window is period 1's window shifted by one
-month). This overlap is worth stating precisely because \cref{sec:backtest} nonetheless finds
-$(\kappa,\gamma)$ swinging between adjacent periods: the instability is not from the windows
-being unrelated, but from a 6-month validation slice being a noisy yardstick even when the
-underlying data barely changes from one period to the next.
-
-\subsection{Turnover and transaction cost, worked example}
+The rolling-window mechanism itself, with the month-numbering table, is given where it is first
+used, in \cref{sec:backtest}'s Design subsection (\cref{tab:timeline}). This appendix works
+through the turnover and transaction-cost calculation in detail.
 
 At each rebalance, \texttt{src/backtest.py} computes turnover and cost from the full weight
 vector as
@@ -249,55 +81,22 @@ purchase from cash), matching the $100\%$ first-period turnover stated in \cref{
 
 \section{Backtest Diagnostics}\label{app:backtest}
 
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.82\textwidth]{fig8_drawdown.png}
-\caption{Drawdown paths of the strategy and the equal-weight benchmark over the out-of-sample
-period. The strategy's deeper trough ($-37.89\%$ against $-20.91\%$) is the risk cost behind
-its higher cumulative return.}
-\label{fig:drawdown}
-\end{figure}
+Equity and drawdown curves for all six variants appear in the main body
+(\cref{fig:equity6,fig:drawdown6}); Method B's month-by-month active-position count, the trace behind
+\cref{sec:cap}'s concentration diagnosis, is shown inline there as \cref{tab:bmonthly}. This
+appendix gives the remaining per-period detail, method A's turnover.
 
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=0.82\textwidth]{fig9_selected_params.png}
-\caption{Hyperparameters selected by validation Sharpe at each monthly rebalance. Two patterns
-are the visual evidence for the turnover diagnosis in \cref{sec:backtest}: $\gamma$ jumps
-across $\{1, 5, 10\}$ between adjacent periods without settling, and $\kappa$ is selected as
-$0$ in most periods.}
+\caption{Method A: $(\kappa,\gamma)$ selected by validation Sharpe at each monthly rebalance, and
+the resulting turnover. $\gamma$ moves across $\{1, 5, 10\}$ between adjacent periods without
+settling, and each move rewrites a meaningful share of the portfolio even under the concentration
+cap of \cref{sec:backtest} --- the visual evidence for the turnover diagnosis in
+\cref{sec:results7}. $\kappa = 0$ is selected in 18 of 25 periods, consistent with the finding
+that the robust term does not earn its keep on this data.}
 \label{fig:selectedparams}
 \end{figure}
-
-\section{Source Code}\label{app:code}
-
-The listings below are extracted directly from the project's source files rather than retyped,
-so they cannot drift from the code that produced the results in this report. Line numbers are
-those of the listing, not of the source file.
-
-\emph{Note on language:} the source files were written with Vietnamese docstrings and inline
-comments, since the implementation predates this report. The code itself, together with the
-derivations in \cref{sec:method} and \cref{app:prox}, is intended to be readable without them.
-
-\subsection{The joint proximal operator}
-\lstinputlisting[firstline=262, lastline=341]{code/prox_solver.py}
-
-\subsection{The robust subgradient}
-\lstinputlisting[firstline=238, lastline=260]{code/prox_solver.py}
-
-\subsection{The main solver loop}
-\lstinputlisting[firstline=383, lastline=505]{code/prox_solver.py}
-
-\subsection{Simplex projection for the long-only variant}
-\lstinputlisting[firstline=506, lastline=534]{code/prox_solver.py}
-
-\subsection{Positive-semidefinite matrix square root}
-\lstinputlisting[firstline=207, lastline=242]{code/estimators.py}
-
-\subsection{Ledoit--Wolf shrinkage intensity}
-\lstinputlisting[firstline=105, lastline=153]{code/estimators.py}
-
-\subsection{Walk-forward backtest driver}
-\lstinputlisting[firstline=199, lastline=315]{code/backtest.py}
 
 \section{Reproduction}\label{app:repro}
 
@@ -305,15 +104,14 @@ derivations in \cref{sec:method} and \cref{app:prox}, is intended to be readable
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python -m src.data_loader     # only if data/*.parquet is absent
-pytest tests/ -v              # 40 passed
+pytest tests/ -v              # 51 passed
 python -m nbconvert --to notebook --execute notebook_en.ipynb \
        --output notebook_en.ipynb
 \end{lstlisting}
 
-The test suite comprises \textbf{40 tests, all passing}, covering the estimators (symmetry,
-positive semidefiniteness, square-root reconstruction, shrinkage bounds), the solver
-(feasibility, exact sparsity, monotonicity of the best objective, simplex projection
-properties, the closed-form mean--variance limiting case), the CVXPY cross-check, and the
+The test suite comprises \textbf{51 tests, all passing}, covering the estimators (symmetry,
+positive semidefiniteness, square-root reconstruction, shrinkage bounds), the CVXPY solve
+(feasibility, sparsity behavior, the closed-form mean--variance limiting case), and the
 backtest (absence of look-ahead in the window construction, turnover accounting, benchmark
 correctness). The notebook executes end to end in roughly 50 seconds from the cached parquet
 files, with no network access.

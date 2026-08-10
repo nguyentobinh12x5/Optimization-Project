@@ -7,7 +7,6 @@ Data layer cho project sparse+robust portfolio optimization (VN100).
 Module này:
 1. Tải danh sách mã cổ phiếu thuộc rổ VN100 (qua vnstock.Listing).
 2. Tải lịch sử giá đóng cửa (close) 4 năm gần nhất cho từng mã (qua vnstock.Quote),
-   với rate-limiting và fallback source để tránh bị chặn bởi free-tier API.
 3. Làm sạch dữ liệu: loại mã thiếu quá nhiều phiên hoặc niêm yết muộn, loại phiên
    cuối tuần/nghi ngày lễ giả (artifact nguồn dữ liệu), forward-fill lỗ hổng
    ngắn, tính simple daily return.
@@ -20,29 +19,18 @@ giả định tài chính được ghi rõ dưới đây thay vì giấu trong c
 
 Giả định quan trọng:
 - `close` trả về từ source VCI được coi là giá ĐÃ ĐIỀU CHỈNH (adjusted) cho cổ
-  tức/chia tách. Đây là giả định phổ biến với dữ liệu VCI qua vnstock nhưng
-  KHÔNG được xác nhận 100% bởi tài liệu chính thức -- nếu cần độ chính xác cao
-  cho backtest thật, nên kiểm chứng lại thủ công với 1-2 mã có sự kiện chia
-  tách/trả cổ tức trong giai đoạn.
+  tức/chia tách.
 - Return dùng ở đây là SIMPLE return = close.pct_change(), KHÔNG phải
   log-return (log-return sẽ khác một chút, không dùng ở phase này).
 - Universe là snapshot VN100 HIỆN TẠI (ngày chạy script) áp dụng ngược cho quá
   khứ 4 năm => có survivorship bias (mã đã bị loại khỏi VN100 hoặc hủy niêm
-  yết trong 4 năm qua sẽ KHÔNG xuất hiện dù từng thuộc rổ). Đây là quyết định
-  thiết kế đã chốt (Gate 1), không phải bug.
+  yết trong 4 năm qua sẽ KHÔNG xuất hiện dù từng thuộc rổ). 
 - Ma trận giá được ghép bằng UNION (outer join) các ngày giao dịch của tất cả
   các mã, không phải intersection: nếu 1 mã không có dữ liệu ở 1 ngày (ví dụ
   bị đình chỉ giao dịch), API vnstock thường không trả về row cho ngày đó
   luôn (thay vì trả NaN) -- outer join khiến ngày đó xuất hiện là NaN cho mã
   đó nhưng có giá trị cho các mã khác, đúng với khái niệm "phiên thiếu" mà
   bước làm sạch bên dưới xử lý.
-
-Rate limiting: free tier vnstock giới hạn ~60 request/phút. Ta sleep ~1.2s
-(tham số `sleep_sec`) giữa các request tải giá của TỪNG mã, và fallback qua
-các source hợp lệ cho Quote theo thứ tự VCI -> KBS khi một source lỗi
-(TCBS/SSI KHÔNG hợp lệ cho Quote, không được dùng). Nếu cả 3 source đều lỗi ở
-lượt đầu cho 1 mã, sleep dài hơn (backoff, mặc định 5s) rồi thử lại toàn bộ
-chuỗi source tối đa 1 lần nữa trước khi coi mã đó là thất bại hẳn.
 
 Cache: nếu data/prices.parquet và data/returns.parquet đã tồn tại và
 force_refresh=False (mặc định), script đọc thẳng từ cache, KHÔNG gọi mạng.
@@ -80,6 +68,8 @@ DATA_DIR = PROJECT_ROOT / "data"
 SYMBOLS_CSV = DATA_DIR / "vn100_symbols.csv"
 PRICES_PARQUET = DATA_DIR / "prices.parquet"
 RETURNS_PARQUET = DATA_DIR / "returns.parquet"
+VN30_INDEX_PARQUET = DATA_DIR / "vn30_index.parquet"
+VN30_INDEX_SYMBOL = "VN30"  # chỉ số VN30 (KHÔNG phải rổ 30 mã thành viên), nguồn VCI
 
 VN100_GROUP = "VN100"
 LISTING_SOURCE = "VCI"  # Listing chỉ nhận source trong {KBS, VCI, MSN}.
@@ -450,6 +440,65 @@ def save_to_cache(symbols: Sequence[str], prices: pd.DataFrame, returns: pd.Data
     pd.Series(sorted(symbols), name="symbol").to_csv(SYMBOLS_CSV, index=False)
     prices.to_parquet(PRICES_PARQUET)
     returns.to_parquet(RETURNS_PARQUET)
+
+
+# --------------------------------------------------------------------------
+# Benchmark "mua & giữ chỉ số VN30" (method D trong so sánh 4 phương pháp,
+# xem docs/superpowers/plans/... hoặc trao đổi trực tiếp với user) -- tải
+# CHÍNH chỉ số VN30 (symbol="VN30", KHÔNG phải rổ 30 mã thành viên), nguồn
+# VCI xác nhận hoạt động thủ công 2026-08-10 (24 phiên trả về đúng OHLCV cho
+# start='2026-07-01', end='2026-08-01').
+# --------------------------------------------------------------------------
+
+def load_vn30_index(force_refresh: bool = False) -> tuple[pd.Series, pd.Series]:
+    """Tải + làm sạch giá đóng cửa chỉ số VN30, dùng làm benchmark "mua & giữ
+    index" (method D). Tái dùng `clean_prices`/`compute_returns` (đã test kỹ
+    trên dữ liệu cổ phiếu VN100) trên DataFrame 1 cột thay vì viết lại logic
+    làm sạch riêng -- cùng lớp phòng vệ loại phiên cuối tuần giả và phiên
+    "lặp giá" (ngày lễ VN rơi vào ngày thường) áp dụng luôn cho chỉ số, vì đây
+    là quirk của NGUỒN DỮ LIỆU (VCI), không riêng gì cổ phiếu lẻ.
+
+    Cache: data/vn30_index.parquet (2 cột: close đã làm sạch, ret = simple
+    daily return). Đọc thẳng từ cache nếu tồn tại và force_refresh=False.
+
+    Returns
+    -------
+    (price, ret) : tuple[pd.Series, pd.Series]
+        price : giá đóng cửa VN30 đã làm sạch, index=date.
+        ret   : simple daily return (pct_change), index=date -- ngắn hơn
+                price đúng 1 phiên đầu tiên (NaN đã bị loại bởi compute_returns).
+    """
+    if not force_refresh and VN30_INDEX_PARQUET.exists():
+        df = pd.read_parquet(VN30_INDEX_PARQUET)
+        return df["close"], df["ret"].dropna()
+
+    if load_dotenv is not None:
+        load_dotenv(PROJECT_ROOT / ".env")  # nạp VNSTOCK_API_KEY, KHÔNG in ra log
+
+    start, end = _default_date_window()
+    logger.info("Đang tải chỉ số %s (nguồn VCI, cửa sổ %s -> %s)...", VN30_INDEX_SYMBOL, start, end)
+    series, used_source = fetch_history_one_symbol(VN30_INDEX_SYMBOL, start, end, sources=("VCI",))
+    if series is None:
+        raise RuntimeError(f"Không tải được chỉ số {VN30_INDEX_SYMBOL} từ VCI.")
+
+    raw = series.to_frame(name=VN30_INDEX_SYMBOL)
+    clean, dropped = clean_prices(raw, start, end)
+    if VN30_INDEX_SYMBOL not in clean.columns:
+        raise RuntimeError(f"clean_prices() loại luôn chỉ số {VN30_INDEX_SYMBOL}: {dropped}")
+    ret_df = compute_returns(clean)
+
+    price = clean[VN30_INDEX_SYMBOL]
+    ret = ret_df[VN30_INDEX_SYMBOL]
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    out = price.to_frame(name="close").join(ret.rename("ret"), how="left")
+    out.to_parquet(VN30_INDEX_PARQUET)
+
+    logger.info(
+        "Chỉ số %s: %d phiên (%s -> %s), nguồn=%s.",
+        VN30_INDEX_SYMBOL, len(price), price.index.min().date(), price.index.max().date(), used_source,
+    )
+    return price, ret
 
 
 # --------------------------------------------------------------------------

@@ -19,7 +19,14 @@ optimizer; annualized figures appear only in the performance table of \cref{sec:
 
 \subsection{Objective Function}
 
-The optimization problem is
+The general objective combining all four terms of \cref{sec:identification} follows the robust
+and sparse mean--variance formulation of \citet{chen2024}, adopted here as the single unifying
+model for this report rather than derived from scratch: their model is the origin of the
+$\kappa\norm{\Ssqrt w}_2$ robustness term and the $\lambda\norm{w}_1$ sparsity term appearing
+together with the classical Markowitz return and variance terms. \Cref{sec:backtest} makes
+precise how each of the six named variants tested there is obtained from this one objective by
+fixing or dropping specific terms --- no variant introduces a term that is not already present
+here. The optimization problem is
 \begin{equation}\label{eq:main}
 \min_{w \in \R^{N}} \quad
   \underbrace{-\muhat^\top w}_{\text{expected return}}
@@ -81,15 +88,18 @@ The first constraint is a second-order cone constraint on $(\Ssqrt w, t)$; the s
 rotated second-order cone, using $w^\top \Sig w = \norm{\Ssqrt w}_2^2$; the third is the standard
 linear splitting of the $\ell_1$ norm, tight at the optimum because $\lambda \ge 0$ pushes each
 $u_i$ down to $|w_i|$; the fourth is affine. Every constraint is thus affine or conic and the
-objective linear in $(w,t,s,u)$, so \cref{eq:main} is a second-order cone program --- which is
-what makes it legitimate to hand the same problem to an interior-point conic solver in
-\cref{sec:insample} and treat its answer as independent ground truth.
+objective linear in $(w,t,s,u)$, so \cref{eq:main} is a second-order cone program --- exactly the
+class of problem a conic interior-point solver handles directly, which is why \cref{sec:insample}
+hands \cref{eq:main} straight to CVXPY/CLARABEL rather than deriving a custom algorithm.
 
-Nondifferentiability shapes the algorithm. Two of the four terms are nonsmooth:
-$\kappa\norm{\Ssqrt w}_2$ fails to be differentiable wherever $\Ssqrt w = 0$, and
-$\lambda\norm{w}_1$ at every point where some $w_i$ is zero --- which, for a penalty whose
-purpose is to drive coordinates to zero, is exactly where the solution lives. Plain gradient
-descent therefore does not apply, and \cref{sec:method} builds a proximal-subgradient method.
+Nondifferentiability is why \cref{eq:main} cannot be solved by plain gradient descent as stated:
+two of the four terms are nonsmooth, $\kappa\norm{\Ssqrt w}_2$ failing to be differentiable
+wherever $\Ssqrt w = 0$, and $\lambda\norm{w}_1$ at every point where some $w_i$ is zero --- which,
+for a penalty whose purpose is to drive coordinates to zero, is exactly where the solution lives.
+The epigraph reformulation \cref{eq:socp} sidesteps this rather than confronting it: introducing
+$(t,s,u)$ moves every nonsmooth term into a conic \emph{constraint}, leaving a linear objective
+over smooth (affine and conic) constraints, which is the form an interior-point method is built
+to solve.
 
 \subsection{Modeling Assumptions}
 
@@ -105,7 +115,11 @@ The model rests on the following assumptions, stated as assumptions rather than 
   \item There are no position limits, sector limits, or liquidity limits beyond the budget
         constraint.
   \item Transaction costs are \emph{absent} from \cref{eq:main}. They are reintroduced only in
-        the backtest of \cref{sec:backtest}, at $0.20\%$ of turnover per rebalance.
+        the backtest of \cref{sec:backtest}, at $0.20\%$ of turnover per rebalance, as a
+        post-hoc evaluation deduction rather than a term the optimizer sees --- the trade-offs
+        of that design choice, and why a turnover penalty is not simply added to \cref{eq:main}
+        instead, are discussed once the empirical cost impact is on the table
+        (\cref{sec:results7}).
   \item Short positions, where they occur, are assumed executable without borrowing cost, and
         portfolio weights are assumed re-set at each evaluation point rather than allowed to
         drift --- except in \cref{sec:backtest}, where both drift between rebalances and the

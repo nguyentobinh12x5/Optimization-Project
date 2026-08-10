@@ -75,6 +75,8 @@ __all__ = [
     "fig7_backtest_equity",
     "fig8_drawdown",
     "fig9_selected_params",
+    "fig10_4method_equity",
+    "fig11_4method_drawdown",
     "generate_all",
 ]
 
@@ -733,8 +735,9 @@ def fig8_drawdown(strategy_result, benchmark_result, *, save: bool = True) -> Fi
 
 def fig9_selected_params(strategy_result, *, save: bool = True) -> Figure:
     """2 panel chia sẻ trục x (ngày rebalance): (a) scatter κ*/γ* được chọn
-    qua Sharpe validation mỗi kỳ (`rebalance_log` cột `kappa`/`gamma`, xem
-    `walk_forward_backtest`); (b) bar turnover mỗi kỳ (%).
+    qua RETURN validation mỗi kỳ (`rebalance_log` cột `kappa`/`gamma`, xem
+    `walk_forward_backtest` -- tiêu chí chọn là cumulative return trên Vwin,
+    KHÔNG phải Sharpe); (b) bar turnover mỗi kỳ (%).
 
     Mục đích: kiểm tra trực quan finding đã ghi ở `.sdd/progress.md` (wf-Task
     4) -- (kappa, gamma) có thể đổi mạnh giữa các kỳ do mẫu validation 6
@@ -777,6 +780,96 @@ def fig9_selected_params(strategy_result, *, save: bool = True) -> Figure:
     fig.tight_layout()
     if save:
         _save(fig, "fig9_selected_params")
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Fig 10-11 -- so sánh 4 phương pháp: (A) Sparse+Robust Markowitz walk-forward,
+# (B) Classical Markowitz (kappa ép = 0), (C) Equal-weight 1/N (VN100),
+# (D) mua & giữ chỉ số VN30 (`src.backtest.index_buy_and_hold_backtest`).
+# Nhận thẳng dict[str, pd.Series] daily_returns thay vì BacktestResult như
+# fig7-9, vì method D chỉ là 1 Series (không có weights/rebalance_log) và
+# method B chạy qua CÙNG walk_forward_backtest với param_grid khác -- caller
+# tự build dict rồi truyền vào, tránh hàm vẽ phải biết cách chạy backtest.
+# ---------------------------------------------------------------------------
+
+_COMPARISON_LINESTYLES = ["-", "--", ":", "-."]
+
+
+def fig10_4method_equity(daily_returns: dict[str, pd.Series], *, save: bool = True) -> Figure:
+    """Đường cong tài sản tích luỹ (net phí) cho tối đa 4 phương pháp so sánh
+    trên cùng 1 axes -- đúng cap "4 series all-pairs" của palette (CAT_COLORS
+    4 slot đầu), mỗi series thêm 1 linestyle khác nhau (relief channel, phân
+    biệt được cả khi in đen trắng, không chỉ dựa vào màu).
+
+    Parameters
+    ----------
+    daily_returns : dict[str, pd.Series]
+        Tên method -> daily net return (index=date), tối đa 4 entry. Caller
+        PHẢI tự đảm bảo cùng khoảng OOS (vd `.loc[common_index]` trên từng
+        series) TRƯỚC khi truyền vào -- hàm này KHÔNG tự align, chỉ vẽ.
+    save : bool, default True
+        Lưu PNG ra `figures/fig10_4method_equity.png`.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    _apply_style()
+    fig, ax = plt.subplots(figsize=(11, 6))
+
+    items = list(daily_returns.items())[:4]
+    for (label, series), color, ls in zip(items, CAT_COLORS, _COMPARISON_LINESTYLES):
+        curve = (1 + series).cumprod()
+        ax.plot(curve.index, curve.values, color=color, linewidth=1.8, linestyle=ls, label=label)
+
+    ax.set_title("4-Method Comparison — Cumulative Equity Curve (net of fees, same OOS period)")
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Portfolio value (normalized, start = 1.0)")
+    ax.grid(True, alpha=0.5)
+    ax.legend(loc="best")
+
+    fig.tight_layout()
+    if save:
+        _save(fig, "fig10_4method_equity")
+    return fig
+
+
+def fig11_4method_drawdown(daily_returns: dict[str, pd.Series], *, save: bool = True) -> Figure:
+    """Drawdown (%) theo thời gian cho tối đa 4 phương pháp, tính từ CHÍNH
+    đỉnh tích luỹ riêng của mỗi đường (không so đỉnh chung) -- đúng định
+    nghĩa `max_drawdown` dùng trong `performance_metrics`, đồng nhất với fig8.
+
+    Parameters
+    ----------
+    daily_returns : dict[str, pd.Series]
+        Xem `fig10_4method_equity` -- cùng quy ước (caller tự align OOS).
+    save : bool, default True
+        Lưu PNG ra `figures/fig11_4method_drawdown.png`.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    _apply_style()
+    fig, ax = plt.subplots(figsize=(11, 5))
+
+    items = list(daily_returns.items())[:4]
+    for (label, series), color, ls in zip(items, CAT_COLORS, _COMPARISON_LINESTYLES):
+        curve = (1 + series).cumprod()
+        drawdown = curve / curve.cummax() - 1
+        ax.plot(drawdown.index, drawdown.values * 100, color=color, linewidth=1.6, linestyle=ls, label=label)
+
+    ax.axhline(0.0, color=BASELINE, linewidth=1.0)
+    ax.set_title("4-Method Comparison — Drawdown Over Time")
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Drawdown (%)")
+    ax.grid(True, alpha=0.5)
+    ax.legend(loc="best")
+
+    fig.tight_layout()
+    if save:
+        _save(fig, "fig11_4method_drawdown")
     return fig
 
 

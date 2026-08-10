@@ -1,5 +1,7 @@
 \documentclass[11pt,a4paper]{article}
 
+\raggedbottom
+
 \usepackage[margin=0.9in]{geometry}
 \usepackage{enumitem}
 \usepackage[T1]{fontenc}
@@ -69,20 +71,24 @@
 \begin{titlepage}
 \centering
 \vspace*{2cm}
-{\LARGE\bfseries Sparse and Robust Mean--Variance\\[0.3em]
-Portfolio Optimization on the VN100 Universe\par}
+{\LARGE\bfseries Robust and Sparse Mean--Variance\\[0.3em]
+Portfolio Optimization: A Walk-Forward\\[0.3em]
+Empirical Study on the VN100 Universe\par}
 \vspace{0.8cm}
-{\large A hand-written proximal-subgradient method,\\
-cross-verified against an interior-point solver\par}
+{\large A convex, second-order-cone program\\
+solved directly with CVXPY/CLARABEL\par}
 \vspace{2.5cm}
 {\large\bfseries Nguyen To Binh\par}
 {\large Student ID: 1010051\par}
-\vspace{0.4cm}
-{\large Individual project\par}
-\vspace{2.5cm}
-{\large TODO: Course name and code\par}
 \vspace{0.3cm}
-{\large TODO: Instructor name\par}
+{\large\bfseries Vu Van Giang\par}
+{\large Student ID: 1010036\par}
+\vspace{0.4cm}
+{\large Group project\par}
+\vspace{2.5cm}
+{\large Optimization\par}
+\vspace{0.3cm}
+{\large Instructor: Cai Yutong\par}
 \vfill
 {\large \today\par}
 \end{titlepage}
@@ -96,7 +102,6 @@ cross-verified against an interior-point solver\par}
 \input{sections/01-problem-identification}
 \input{sections/02-problem-modeling}
 \input{sections/03-model-correctness}
-\input{sections/04-solution-method}
 \input{sections/05-data}
 \input{sections/06-results-insample}
 \input{sections/07-backtest}

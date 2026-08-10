@@ -3,12 +3,28 @@
 An investor has one unit of capital and must divide it among the stocks of the VN100 index, the
 hundred largest and most actively traded companies listed in Vietnam. Ninety-eight of those
 tickers survive the data cleaning of \cref{sec:data}, and the decision is informed by four
-years of daily closing prices. What fraction of capital should go into each stock?
+years of daily closing prices. What fraction of capital should go into each stock? This is the
+general problem of \textbf{portfolio optimization}: choosing capital weights that are, in some
+precise sense, the best response to a set of assets' estimated returns and risks.
 
-The textbook answer is Markowitz mean--variance analysis \citep{markowitz1952}: estimate each
-stock's average return and the covariances between stocks, then trade expected return against
-portfolio variance. That answer is incomplete for three reasons, and each motivates a term in
-the model of \cref{sec:modeling}.
+\textbf{There is no single formula that is best for every market.} The literature offers several
+competing answers to what ``best'' should mean --- plain mean--variance efficiency
+\citep{markowitz1952}, robustness to estimation error \citep{goldfarb2003}, an explicit penalty
+on the number of positions held \citep{tibshirani1996, brodie2009} --- and which of these actually
+helps depends on the statistical character of the specific universe being invested in: how noisy
+its mean returns are, how correlated its constituents are, how expensive its transaction costs
+are. A formula tuned on, say, US large-cap equities carries no guarantee of transferring to a
+100-stock Vietnamese universe with a different correlation structure and a different cost profile.
+The approach taken here is accordingly not to commit upfront to one fixed formula and assume it is
+right, but to state \textbf{one general objective} whose competing terms can each be switched on,
+off, or tuned --- collapsing to several named strategies as special cases --- and to let the data
+decide, empirically, which configuration of that objective actually performs best on \emph{this}
+universe.
+
+The textbook starting point for that general objective is Markowitz mean--variance analysis
+\citep{markowitz1952}: estimate each stock's average return and the covariances between stocks,
+then trade expected return against portfolio variance. That answer alone is incomplete for three
+reasons, and each motivates a term the general formula must be able to switch on:
 
 \textbf{The inputs are estimates, and the mean is a bad one.} An average return computed from a
 few years of daily data is noisy. An optimizer handed such an estimate will concentrate capital
@@ -16,24 +32,30 @@ in whichever stocks happened to drift upward during the sample, because it canno
 genuine tendency from an accident of the period; the resulting portfolio is optimal for the past
 and arbitrary for the future. This is the standard explanation for why optimized portfolios so
 often fail to beat a naive equal-weight benchmark out of sample \citep{demiguel2009}. A useful
-model should therefore ask not only what is best if the estimate is right, but what remains
-acceptable if it is wrong.
+model should therefore be able to ask not only what is best if the estimate is right, but what
+remains acceptable if it is wrong.
 
 \textbf{Holding ninety-eight stocks is expensive.} A mathematically optimal portfolio typically
 assigns a nonzero weight to every available asset, many of them a fraction of a percent. Each
 position must be bought, rebalanced, monitored, and sold, and each transaction costs money. An
 investor generally prefers ten or twenty names to ninety-eight even at some cost in theoretical
-optimality --- a preference worth encoding rather than ignoring.
+optimality --- a preference worth encoding as an optional term rather than ignoring or forcing on
+unconditionally.
 
-\textbf{Risk still matters.} Variance of the realized portfolio return remains a genuine
-concern, and the classical quadratic penalty remains the natural way to express it.
+\textbf{Risk still matters.} Variance of the realized portfolio return remains a genuine concern,
+and the classical quadratic penalty remains the natural way to express it, in every
+configuration.
 
-The goal is therefore to find weights balancing four competing objectives at once --- expected
-return, variance, sensitivity to a mis-estimated mean, and the number of positions held --- and
-to do so with an algorithm written from scratch rather than delegated to an off-the-shelf
-solver, so that the optimization machinery is the object of study rather than a black box.
-\Cref{sec:modeling} states and classifies the model, \cref{sec:correctness} argues it
-represents the problem faithfully, \cref{sec:method} derives the algorithm, \cref{sec:data}
-describes the data, \cref{sec:insample} reports in-sample results and verifies the solver
-against an independent one, \cref{sec:backtest} tests the strategy out of sample, and
-\cref{sec:conclusion} discusses efficiency, quality, and limitations.
+The goal is therefore twofold: first, to state one model, balancing up to four competing
+objectives at once --- expected return, variance, sensitivity to a mis-estimated mean, and the
+number of positions held --- general enough that fixing or dropping its terms reproduces several
+named strategies rather than requiring a separate formula for each; second, to treat the choice
+\emph{among} those configurations as an empirical question specific to VN100 rather than a
+theoretical one settled in advance, answered by walk-forward testing several configurations
+against each other on this exact universe and reporting which one actually wins here.
+\Cref{sec:modeling} states and classifies the general model, \cref{sec:correctness} argues it
+represents the problem faithfully and is convex and second-order-cone representable,
+\cref{sec:data} describes the data, \cref{sec:insample} solves the model directly with
+CVXPY/CLARABEL and reports in-sample results, \cref{sec:backtest} turns the choice of
+configuration into that empirical test --- six named variants, walk-forward out of sample, on the
+VN100 universe specifically --- and \cref{sec:conclusion} discusses efficiency and limitations.
