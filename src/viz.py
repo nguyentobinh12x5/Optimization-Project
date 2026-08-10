@@ -202,12 +202,12 @@ def fig1_data_overview(returns: pd.DataFrame | None = None, *, save: bool = True
     ax.set_xticklabels(corr.columns[ticks], rotation=90, fontsize=7)
     ax.set_yticklabels(corr.columns[ticks], fontsize=7)
 
-    ax.set_xlabel(f"Mã cổ phiếu (N={n})")
-    ax.set_ylabel(f"Mã cổ phiếu (N={n})")
-    ax.set_title("VN100 Universe — Ma trận tương quan return ngày (Pearson)")
+    ax.set_xlabel(f"Ticker (N={n})")
+    ax.set_ylabel(f"Ticker (N={n})")
+    ax.set_title("VN100 Universe — Daily Return Correlation Matrix (Pearson)")
 
     cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    cbar.set_label("Hệ số tương quan (đơn vị: không thứ nguyên, [-1, 1])")
+    cbar.set_label("Correlation coefficient (dimensionless, [-1, 1])")
 
     fig.tight_layout()
     if save:
@@ -279,14 +279,14 @@ def fig2_convergence(
 
     if all_positive:
         ax.set_yscale("log")
-        ax.set_ylabel("Objective f(w_k)  (thang log)")
+        ax.set_ylabel("Objective f(w_k)  (log scale)")
     else:
         ax.set_ylabel("Objective f(w_k)")
 
     ax.set_xlabel("Iteration k")
-    ax.set_title("Hội tụ solver proximal-subgradient — f(w_k) theo iteration")
+    ax.set_title("Proximal-Subgradient Solver Convergence — f(w_k) vs. Iteration")
     ax.grid(True, alpha=0.6)
-    ax.legend(title="Bộ tham số", loc="best")
+    ax.legend(title="Parameter set", loc="best")
 
     fig.tight_layout()
     if save:
@@ -343,9 +343,9 @@ def fig3_sparsity_path(
     fig, ax = plt.subplots(figsize=(7, 5))
     ax.plot(lambdas, n_active, color=CAT_COLORS[0], marker="o", markersize=5, linewidth=1.8)
     ax.set_xscale("log")
-    ax.set_xlabel("λ (hệ số phạt L1, thang log)")
-    ax.set_ylabel(f"Số tài sản active (|w_i| > {active_thresh:g})")
-    ax.set_title(f"Sparsity path — κ={kappa:g}, γ={gamma:g} cố định")
+    ax.set_xlabel("λ (L1 penalty coefficient, log scale)")
+    ax.set_ylabel(f"Active assets (|w_i| > {active_thresh:g})")
+    ax.set_title(f"Sparsity Path — κ={kappa:g}, γ={gamma:g} fixed")
     ax.grid(True, alpha=0.6)
 
     fig.tight_layout()
@@ -397,8 +397,8 @@ def fig4_weights_bar(
     _apply_style()
     if param_sets is None:
         param_sets = [
-            {"kappa": 1.0, "gamma": 5.0, "lam": 0.001, "label": "λ nhỏ (0.001) — dense hơn"},
-            {"kappa": 1.0, "gamma": 5.0, "lam": 0.02, "label": "λ lớn (0.02) — thưa hơn"},
+            {"kappa": 1.0, "gamma": 5.0, "lam": 0.001, "label": "small λ (0.001) — denser"},
+            {"kappa": 1.0, "gamma": 5.0, "lam": 0.02, "label": "large λ (0.02) — sparser"},
         ]
     param_sets = param_sets[:3]  # cap 3 panel cho dễ đọc
 
@@ -430,15 +430,15 @@ def fig4_weights_bar(
         vals = w[order]
         ax.bar(x, vals, color=color, width=0.7)
         ax.axhline(0.0, color=BASELINE, linewidth=1.0, linestyle="--")
-        ax.set_ylabel("Trọng số wᵢ")
+        ax.set_ylabel("Weight wᵢ")
         ax.set_title(label, fontsize=10, loc="left", fontweight="normal", color=INK_SECONDARY)
         ax.grid(True, axis="y", alpha=0.5)
 
     axes[-1].set_xticks(x)
     axes[-1].set_xticklabels(active_symbols, rotation=90, fontsize=7)
-    axes[-1].set_xlabel(f"Mã cổ phiếu (active tại ít nhất 1 bộ tham số, N={len(order)})")
+    axes[-1].set_xlabel(f"Ticker (active in at least 1 parameter set, N={len(order)})")
 
-    fig.suptitle("Trọng số danh mục w* tại các bộ tham số tiêu biểu", fontsize=12, fontweight="bold", y=1.0)
+    fig.suptitle("Portfolio Weights w* at Representative Parameter Sets", fontsize=12, fontweight="bold", y=1.0)
     fig.tight_layout()
     if save:
         _save(fig, "fig4_weights_bar")
@@ -526,9 +526,9 @@ def fig5_robust_effect(
     ax_bar.axhline(0.0, color=BASELINE, linewidth=1.0, linestyle="--")
     ax_bar.set_xticks(x)
     ax_bar.set_xticklabels(active_symbols, rotation=90, fontsize=7)
-    ax_bar.set_xlabel(f"Mã cổ phiếu (active tại ít nhất 1 κ, N={len(order)})")
-    ax_bar.set_ylabel("Trọng số wᵢ")
-    ax_bar.set_title("Trọng số theo mã", fontsize=10, loc="left", color=INK_SECONDARY)
+    ax_bar.set_xlabel(f"Ticker (active for at least 1 κ, N={len(order)})")
+    ax_bar.set_ylabel("Weight wᵢ")
+    ax_bar.set_title("Weights by Ticker", fontsize=10, loc="left", color=INK_SECONDARY)
     ax_bar.legend(title=f"γ={gamma:g}, λ={lam:g}", loc="best")
     ax_bar.grid(True, axis="y", alpha=0.5)
 
@@ -542,14 +542,14 @@ def fig5_robust_effect(
             ax_metrics.annotate(f"{v:.1f}", (b.get_x() + b.get_width() / 2, b.get_height()),
                                  ha="center", va="bottom", fontsize=8, color=INK_PRIMARY)
     ax_metrics.set_xticks(metric_x)
-    ax_metrics.set_xticklabels(["Số mã active", "HHI × 100"])
-    ax_metrics.set_ylabel("Giá trị chỉ số")
-    ax_metrics.set_title("Độ tập trung danh mục", fontsize=10, loc="left", color=INK_SECONDARY)
+    ax_metrics.set_xticklabels(["Active tickers", "HHI × 100"])
+    ax_metrics.set_ylabel("Metric value")
+    ax_metrics.set_title("Portfolio Concentration", fontsize=10, loc="left", color=INK_SECONDARY)
     ax_metrics.legend(loc="best")
     ax_metrics.grid(True, axis="y", alpha=0.5)
 
     fig.suptitle(
-        f"Hiệu ứng robust term: κ=0 vs κ={kappa_values[1]:g} (γ={gamma:g}, λ={lam:g} cố định)",
+        f"Robust-Term Effect: κ=0 vs κ={kappa_values[1]:g} (γ={gamma:g}, λ={lam:g} fixed)",
         fontsize=12, fontweight="bold",
     )
     fig.tight_layout()
@@ -604,16 +604,16 @@ def fig6_prox_vs_cvxpy(
     lo, hi = lo - pad, hi + pad
 
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.plot([lo, hi], [lo, hi], color=BASELINE, linewidth=1.2, linestyle="--", label="y = x (khớp hoàn hảo)")
+    ax.plot([lo, hi], [lo, hi], color=BASELINE, linewidth=1.2, linestyle="--", label="y = x (perfect match)")
     ax.scatter(w_hand, w_cvx, color=CAT_COLORS[0], s=28, alpha=0.85, edgecolor="white", linewidth=0.4,
-               label="Tài sản (97 mã)")
+               label=f"Assets (N={len(w_hand)})")
 
     ax.set_xlim(lo, hi)
     ax.set_ylim(lo, hi)
     ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel("w_hand — solver tay (proximal-subgradient)")
+    ax.set_xlabel("w_hand — hand-written solver (proximal-subgradient)")
     ax.set_ylabel("w_cvxpy — CVXPY (CLARABEL, ground truth)")
-    ax.set_title(f"Solver tay vs CVXPY — κ={kappa:g}, γ={gamma:g}, λ={lam:g}")
+    ax.set_title(f"Hand-Written Solver vs. CVXPY — κ={kappa:g}, γ={gamma:g}, λ={lam:g}")
     ax.legend(loc="best")
     ax.grid(True, alpha=0.5)
 
@@ -665,13 +665,13 @@ def fig7_backtest_equity(strategy_result, benchmark_result, *, save: bool = True
     bench_curve = (1 + benchmark_result.daily_returns).cumprod()
 
     ax.plot(strat_curve.index, strat_curve.values, color=CAT_COLORS[0], linewidth=1.8,
-             label="Chiến lược (long-only, walk-forward)")
+             label="Strategy (long-only, walk-forward)")
     ax.plot(bench_curve.index, bench_curve.values, color=CAT_COLORS[1], linewidth=1.6,
              linestyle="--", label="Equal-weight 1/N")
 
-    ax.set_title("Backtest walk-forward — Đường cong tài sản tích luỹ (net phí)")
-    ax.set_xlabel("Ngày")
-    ax.set_ylabel("Giá trị danh mục (chuẩn hoá, bắt đầu = 1.0)")
+    ax.set_title("Walk-Forward Backtest — Cumulative Equity Curve (net of fees)")
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Portfolio value (normalized, start = 1.0)")
     ax.grid(True, alpha=0.5)
     ax.legend(loc="best")
 
@@ -706,7 +706,7 @@ def fig8_drawdown(strategy_result, benchmark_result, *, save: bool = True) -> Fi
     fig, ax = plt.subplots(figsize=(11, 5))
 
     for result, label, color, ls in [
-        (strategy_result, "Chiến lược", CAT_COLORS[0], "-"),
+        (strategy_result, "Strategy", CAT_COLORS[0], "-"),
         (benchmark_result, "Equal-weight 1/N", CAT_COLORS[1], "--"),
     ]:
         curve = (1 + result.daily_returns).cumprod()
@@ -715,8 +715,8 @@ def fig8_drawdown(strategy_result, benchmark_result, *, save: bool = True) -> Fi
                  linestyle=ls, label=label)
 
     ax.axhline(0.0, color=BASELINE, linewidth=1.0)
-    ax.set_title("Drawdown theo thời gian")
-    ax.set_xlabel("Ngày")
+    ax.set_title("Drawdown Over Time")
+    ax.set_xlabel("Date")
     ax.set_ylabel("Drawdown (%)")
     ax.grid(True, alpha=0.5)
     ax.legend(loc="best")
@@ -761,17 +761,17 @@ def fig9_selected_params(strategy_result, *, save: bool = True) -> Figure:
     fig, axes = plt.subplots(2, 1, figsize=(11, 8), sharex=True)
     log = strategy_result.rebalance_log
 
-    axes[0].scatter(log.index, log["kappa"], color=CAT_COLORS[0], s=40, label="κ đã chọn")
-    axes[0].scatter(log.index, log["gamma"], color=CAT_COLORS[1], s=40, marker="x", label="γ đã chọn")
-    axes[0].set_ylabel("Giá trị tham số")
-    axes[0].set_title("Tham số (κ, γ) được chọn qua validation mỗi kỳ")
+    axes[0].scatter(log.index, log["kappa"], color=CAT_COLORS[0], s=40, label="Selected κ")
+    axes[0].scatter(log.index, log["gamma"], color=CAT_COLORS[1], s=40, marker="x", label="Selected γ")
+    axes[0].set_ylabel("Parameter value")
+    axes[0].set_title("Selected (κ, γ) via Validation Sharpe Each Period")
     axes[0].grid(True, alpha=0.5)
     axes[0].legend(loc="best")
 
     axes[1].bar(log.index, log["turnover"] * 100, width=15, color=CAT_COLORS[0])
     axes[1].set_ylabel("Turnover (%)")
-    axes[1].set_xlabel("Ngày rebalance")
-    axes[1].set_title("Turnover mỗi kỳ rebalance")
+    axes[1].set_xlabel("Rebalance date")
+    axes[1].set_title("Turnover per Rebalance")
     axes[1].grid(True, axis="y", alpha=0.5)
 
     fig.tight_layout()
