@@ -38,7 +38,7 @@
 \newcommand{\bad}[1]{\textcolor{red!60!black}{\textbf{#1}}}
 
 \title[Robust+Sparse Portfolio Opt.]{Robust and Sparse Mean--Variance\\Portfolio Optimization: A Walk-Forward\\Empirical Study on the VN100 Universe}
-\subtitle{A convex, second-order-cone program, solved directly with CVXPY/CLARABEL}
+\subtitle{A proximal-subgradient method, verified against CVXPY/CLARABEL}
 \author[Binh \& Giang]{Nguyen To Binh (1010051) \\ Vu Van Giang (1010036) \\ \small Group project}
 \institute[]{Optimization \\ Instructor: Cai Yutong}
 \date[\today]{\today}
@@ -54,13 +54,20 @@
 \end{frame}
 
 % ============================================================
-\section{Motivation}
+% CORE DECK -- the 10-minute talk. ~10 content slides.
+% Everything else (backup) lives after the Thank-you frame,
+% under a starred \section* so it stays off this outline and
+% doesn't trigger the per-section recap frame below.
 % ============================================================
 \AtBeginSection[]{
   \begin{frame}{Outline}
     \tableofcontents[currentsection]
   \end{frame}
 }
+
+% ============================================================
+\section{Motivation}
+% ============================================================
 
 \begin{frame}{The problem, in plain words}
   An investor has \textbf{1 unit of capital} and must split it across the
@@ -86,26 +93,9 @@
   it is tested empirically on VN100 later, and the answer is not the obvious one.}}
 \end{frame}
 
-\begin{frame}{No single formula is best for every market}
-  The literature offers several competing answers to what ``best'' should mean:
-  \begin{itemize}
-    \item plain mean--variance efficiency (Markowitz, 1952)
-    \item robustness to estimation error (Goldfarb \& Iyengar, 2003)
-    \item an explicit penalty on the number of positions held (Tibshirani, 1996; Brodie et al.,
-          2009)
-  \end{itemize}
-
-  \vspace{0.2cm}
-  Which one actually \emph{helps} depends on the market: how noisy its mean returns are, how
-  correlated its constituents are, how expensive its transaction costs are. A formula tuned on
-  US large-cap equities is not guaranteed to transfer to a 100-stock Vietnamese universe.
-
-  \vspace{0.3cm}
-  \begin{center}
-  \Large\good{Our approach:} state \textbf{one general objective}, let the data decide which
-  configuration wins \textbf{on VN100 specifically}.
-  \end{center}
-\end{frame}
+% ============================================================
+\section{The Model}
+% ============================================================
 
 \begin{frame}{Four objectives $\to$ four terms}
   \begin{equation}\label{eq:main}
@@ -126,7 +116,7 @@
   \textbf{Term} & \textbf{Role} \\
   \midrule
   $-\muhat^\top w$ & maximize expected return \\
-  $\kappa \norm{\Ssqrt w}_2$ & worst case if $\muhat$ is wrong (derived, not assumed --- next section) \\
+  $\kappa \norm{\Ssqrt w}_2$ & worst case if $\muhat$ is wrong (derived, not assumed) \\
   $\gamma\, w^\top \Sig w$ & classical Markowitz variance penalty \\
   $\lambda \norm{w}_1$ & convex surrogate for \# holdings; also caps gross leverage \\
   \bottomrule
@@ -136,9 +126,314 @@
   design choice, revisited for the long-only variants later.
 \end{frame}
 
+\begin{frame}{Type of problem $\Rightarrow$ how we solve it}
+  \textbf{Convex}: each term is affine, a norm, or a PSD quadratic, and the feasible set is
+  affine (full term-by-term proof: backup) $\Rightarrow$ \textbf{every local optimum is
+  global.} So a \emph{local}, first-order iteration is enough --- convexity promotes whatever
+  it converges to into the global optimum.
+
+  \vspace{0.2cm}
+  But \cref{eq:main} is \textbf{nonsmooth}: $\kappa\norm{\Ssqrt w}_2$ at $\Ssqrt w=0$, and
+  $\lambda\norm{w}_1$ wherever some $w_i=0$ --- i.e.\ exactly where the solution lives.
+  Plain gradient descent does not apply.
+
+  \vspace{0.2cm}
+  \textbf{Our approach:} split off the nonsmooth part and give it a \emph{prox} step.
+  \[
+    f(w) = \underbrace{-\muhat^\top w + \kappa\norm{\Ssqrt w}_2 + \gamma w^\top\Sig w}
+           _{g:\ \text{subgradient}}
+         + \underbrace{\lambda\norm{w}_1 + I_{\{\one^\top w=1\}}(w)}_{h:\ \text{prox}}
+  \]
+  \[
+    w_{k+1} = \mathrm{prox}_{\alpha_k h}\bigl(w_k - \alpha_k v_k\bigr),
+    \qquad v_k\in\partial g(w_k),
+    \qquad \alpha_k = \alpha_0/\sqrt{k+1}
+  \]
+  \vspace{-0.2cm}
+  \begin{center}
+  \small The budget constraint lives \emph{inside} $h$ --- not handled separately.
+  \end{center}
+\end{frame}
+
+\begin{frame}{The prox step: why it must be solved jointly}
+  \small
+  \[
+    \mathrm{prox}_{th}(z) = \arg\min_w \tfrac12\norm{w-z}_2^2 + t\lambda\norm{w}_1
+    \quad\text{s.t.}\quad \one^\top w = 1
+  \]
+  Lagrange multiplier $\nu$ on the constraint $\Rightarrow$ separable across coordinates:
+  \[
+    w_i(\nu) = \mathcal{S}_{t\lambda}(z_i+\nu),
+    \qquad \mathcal{S}_\tau(x)=\mathrm{sign}(x)\max(|x|-\tau,0)
+  \]
+  Choose $\nu$ so that $\phi(\nu):=\sum_i \mathcal S_{t\lambda}(z_i+\nu)=1$. $\phi$ is continuous
+  and nondecreasing $\Rightarrow$ \textbf{bisection} (tol $10^{-12}$). Coordinates with
+  $|z_i+\nu^\star|\le t\lambda$ become \good{exactly zero}.
+
+  \vspace{0.25cm}
+  \begin{block}{\small The tempting shortcut is wrong}
+  \small Soft-threshold \emph{then} project onto $\{\one^\top w=1\}$ is \bad{not} the prox of $h$:
+  projection adds the constant $(1-\one^\top w)/N$ to \emph{every} coordinate, so every zero the
+  threshold just created is immediately revived. We implemented this first --- it produced
+  \bad{no exact zeros at all}.
+  \end{block}
+\end{frame}
+
+\begin{frame}{Does our solver actually work? Verify against CVXPY/CLARABEL}
+  \scriptsize Convexity guarantees the \emph{problem} has one global optimum --- not that our
+  \emph{code} is right. A sign error or early-terminating bisection returns a feasible-looking
+  $w$, silently.
+  \vspace{-0.1cm}
+  \begin{columns}
+    \column{0.5\textwidth}
+    \scriptsize
+    \begin{tabular}{@{}rrrrc@{}}
+    \toprule
+    $\kappa$ & $\gamma$ & $\lambda$ & Rel.\ gap & Jaccard \\
+    \midrule
+    2   & 10 & 0.005 & $-1.1\mathrm{e}{-8}$ & \good{1.00} \\
+    1   & 5  & 0.010 & $1.9\mathrm{e}{-7}$  & \good{1.00} \\
+    1   & 5  & 0     & $5.1\mathrm{e}{-7}$  & \good{1.00} \\
+    0.5 & 1  & 0.020 & $1.8\mathrm{e}{-6}$  & \good{1.00} \\
+    0   & 5  & 0.100 & $7.8\mathrm{e}{-6}$  & \good{1.00} \\
+    0   & 5  & 0     & \bad{$2.0\mathrm{e}{-2}$} & \good{1.00} \\
+    \bottomrule
+    \end{tabular}
+
+    \vspace{0.1cm}
+    \scriptsize Identical active sets everywhere; objective agrees to 6 s.f. Cost at $N=98$:
+    $146$\,ms (prox, $O(N^2)$/iter) vs.\ $25$\,ms (CLARABEL, $O(N^3)$/iter) --- CLARABEL wins
+    $\sim6\times$ here; reverses at $N$ in the thousands.
+    \column{0.48\textwidth}
+    \includegraphics[width=0.78\textwidth]{fig6_prox_vs_cvxpy.png}
+  \end{columns}
+  \scriptsize \bad{Last row failed, and is reported:} with $\kappa=\lambda=0$ both nonsmooth terms
+  vanish, so the $\alpha_0/\sqrt{k+1}$ step --- mandatory for the nonsmooth case --- is needlessly
+  slow on a now-smooth quadratic. Stalls at $2.0\%$ after 5000 iters. (Convergence plot: backup.)
+\end{frame}
+
 % ============================================================
-\section{The model}
+\section{One Formula, Six Methods}
 % ============================================================
+
+\begin{frame}{From one formula to six named strategies}
+  Each variant tested later is \cref{eq:main} with certain terms fixed or dropped --- no
+  variant introduces anything not already in the general objective.
+  \vspace{0.2cm}
+  \small
+  \begin{table}
+  \begin{tabular}{@{}llccl@{}}
+  \toprule
+  \textbf{Method} & \textbf{Type} & $\kappa$ & $\lambda$ & \textbf{Notes} \\
+  \midrule
+  A: Robust Markowitz    & long-only ($w\ge0$)  & searched     & $\equiv0$ (vacuous) & robust + variance \\
+  B: Classical Markowitz & long-only ($w\ge0$)  & $\equiv0$    & $\equiv0$ (vacuous) & variance only \\
+  C: Equal-weight $1/N$  & no optimization      & --           & --                  & reset monthly \\
+  D: VN100 buy\&hold     & no optimization      & --           & --                  & set once, drift \\
+  E: Sparse-only         & long-short           & $\equiv0$    & searched            & variance + sparsity \\
+  F: Full equation       & long-short           & searched     & searched            & all four terms \\
+  \bottomrule
+  \end{tabular}
+  \end{table}
+  \vspace{0.2cm}
+  \small A/B add $w\ge0$: the simplex constraint then forces $\norm{w}_1\equiv1$, so $\lambda$ is
+  dropped from their search rather than tuned pointlessly --- any concentration A/B show is a
+  \emph{free} effect of the simplex geometry, not a designed sparsity term.
+\end{frame}
+
+% ============================================================
+\section{Walk-Forward Backtest \& Results}
+% ============================================================
+
+\begin{frame}{Walk-forward out-of-sample backtest}
+  \textbf{Why:} in-sample results above optimize on data already seen --- say nothing about
+  deployed performance.
+
+  \vspace{0.2cm}
+  \begin{itemize}
+    \item Rolling \textbf{24-month} window: 18 months fit + 6 months validate, sliding 1 month
+          at a time (diagram next)
+    \item \textbf{Monthly} rebalance, \textbf{494 out-of-sample days}, \textbf{25 rebalances}
+    \item Ledoit--Wolf shrinkage; \textbf{0.20\%} transaction cost per unit turnover
+    \item Two benchmarks built from the \emph{same} 98-ticker universe (not an external VN30
+          index): C (equal-weight, monthly) and D (VN100 buy\&hold, once)
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Rolling window, concretely: three consecutive periods}
+  \begin{center}
+  \begin{tikzpicture}[x=0.34cm, y=0.85cm, font=\scriptsize]
+    % month axis
+    \draw[->] (0,-0.4) -- (28.5,-0.4) node[right]{month};
+    \foreach \m in {1,6,12,18,24,27} {
+      \draw (\m,-0.45) -- (\m,-0.35);
+      \node[below] at (\m,-0.6) {\m};
+    }
+
+    % Period 1
+    \node[above,font=\tiny\bfseries] at (10,2.65) {Period 1};
+    \draw[fill=blue!25] (1,2.15) rectangle (19,2.65);
+    \node at (10,2.4) {$E$};
+    \draw[fill=orange!35] (19,2.15) rectangle (25,2.65);
+    \node at (22,2.4) {$V$};
+    \draw[fill=green!45] (25,2.15) rectangle (26,2.65);
+    \node[right,font=\tiny] at (26,2.4) {25};
+
+    % Period 2 -- shifted by exactly 1 month
+    \node[above,font=\tiny\bfseries] at (11,1.65) {Period 2};
+    \draw[fill=blue!25] (2,1.15) rectangle (20,1.65);
+    \node at (11,1.4) {$E$};
+    \draw[fill=orange!35] (20,1.15) rectangle (26,1.65);
+    \node at (23,1.4) {$V$};
+    \draw[fill=green!45] (26,1.15) rectangle (27,1.65);
+    \node[right,font=\tiny] at (27,1.4) {26};
+
+    % Period 3 -- shifted by another month
+    \node[above,font=\tiny\bfseries] at (12,0.65) {Period 3};
+    \draw[fill=blue!25] (3,0.15) rectangle (21,0.65);
+    \node at (12,0.4) {$E$};
+    \draw[fill=orange!35] (21,0.15) rectangle (27,0.65);
+    \node at (24,0.4) {$V$};
+    \draw[fill=green!45] (27,0.15) rectangle (28,0.65);
+    \node[right,font=\tiny] at (28,0.4) {27};
+  \end{tikzpicture}
+  \end{center}
+  \vspace{0.1cm}
+  \small
+  \textcolor{blue!55!black}{\rule{0.28cm}{0.28cm}}~Estimation $E$ (18 mo) \quad
+  \textcolor{orange!85!black}{\rule{0.28cm}{0.28cm}}~Validation $V$ (6 mo) \quad
+  \textcolor{green!50!black}{\rule{0.28cm}{0.28cm}}~Deployed month
+
+  \vspace{0.15cm}
+  The window \textbf{slides forward by exactly 1 month} each period: Period 1 and Period 2
+  share \textbf{23 of 24} months of data --- yet $(\kappa,\gamma)$ still swings between periods
+  (discussed further in backup). A 6-month validation slice is a noisy yardstick even when the
+  underlying data barely changes.
+\end{frame}
+
+\begin{frame}{Results: all six variants, no constraint beyond \cref{eq:main}}
+  \small
+  \begin{table}
+  \begin{tabular}{@{}lrrrrr@{}}
+  \toprule
+  \textbf{Method} & CumRet & AnnRet & Vol & Sharpe & MaxDD \\
+  \midrule
+  A: Robust (long-only)     & 37.7\%   & 17.7\%   & 30.9\%  & 0.68 & $-39.7\%$ \\
+  B: Classical (long-only)  & \good{74.2\%} & \good{32.7\%} & 31.6\% & \good{1.05} & $-39.7\%$ \\
+  C: Equal-weight $1/N$     & 14.7\%   & 7.3\%    & 19.9\%  & 0.45 & $-20.9\%$ \\
+  D: VN100 buy\&hold        & 21.5\%   & 10.4\%   & 20.1\%  & 0.59 & \good{$-20.4\%$} \\
+  E: Sparse-only (long-short) & \bad{$-100.0\%$} & \bad{$-100.0\%$} & 245.5\% & 0.55 & \bad{$-100.0\%$} \\
+  F: Full equation (long-short) & \bad{$-100.0\%$} & \bad{$-100.0\%$} & 240.8\% & 0.42 & \bad{$-100.0\%$} \\
+  \bottomrule
+  \end{tabular}
+  \end{table}
+  \vspace{-0.15cm}
+  \begin{columns}
+    \column{0.5\textwidth}
+    \includegraphics[height=2.75cm]{fig10a_6method_equity.png}
+    \column{0.5\textwidth}
+    \includegraphics[height=2.75cm]{fig10b_6method_drawdown.png}
+  \end{columns}
+  {\scriptsize Sharpe is \emph{arithmetic}, $(\overline{r}/\sigma)\sqrt{252}$ --- not AnnRet$/$Vol.
+  Hence E/F show \bad{positive} Sharpe despite losing everything: at $245\%$ vol the drag
+  $\tfrac12\sigma^2\!\approx\!301\%$ dwarfs the mean $\approx\!135\%$. \good{Sharpe cannot see
+  leverage} --- and Sharpe is what selects the parameters.}
+\end{frame}
+
+\begin{frame}{A concentration problem, and a constraint to fix it}
+  A and B already beat both benchmarks --- but the \emph{number of names held} swings wildly:
+  B's active count ranges \textbf{1 to 14}, mean 7.56, month to month.
+
+  \vspace{0.1cm}
+  \bad{February 2025:} B's entire portfolio concentrated in a \textbf{single ticker} (VTP) ---
+  then lost \bad{9.47\%} the following month when that edge did not persist.
+
+  \vspace{0.15cm}
+  \textbf{Fix:} add $w_i \le 1/K$ for A/B ($K$ = investor-chosen min.\ names held, genuinely
+  convex). $K=5$ gives a 20\% per-name cap.
+  \small
+  \begin{table}
+  \begin{tabular}{@{}lrrrrr@{}}
+  \toprule
+  \textbf{Method} & CumRet & AnnRet & Vol & Sharpe & MaxDD \\
+  \midrule
+  A, uncapped      & 37.7\% & 17.7\% & 30.9\% & 0.68 & $-39.7\%$ \\
+  A, capped $20\%$ & 56.8\% & 25.8\% & 21.3\% & 1.19 & $-25.0\%$ \\
+  B, uncapped      & 74.2\% & 32.7\% & 31.6\% & 1.05 & $-39.7\%$ \\
+  B, capped $20\%$ & \good{76.3\%} & \good{33.6\%} & 22.8\% & \good{1.39} & $-25.0\%$ \\
+  \bottomrule
+  \end{tabular}
+  \end{table}
+  \small The cap \emph{raises} return while \emph{cutting} vol/drawdown by a third ---
+  \good{long-only beats both benchmarks}; long-short without a leverage bound (E/F) is a
+  cautionary tale the other way (backup: mechanism \& worst day).
+\end{frame}
+
+% ============================================================
+\section{Conclusion}
+% ============================================================
+
+\begin{frame}{Conclusion}
+  \begin{itemize}
+    \item Formulated a \textbf{convex, SOCP-representable} model (Chen et al., 2024) where the
+          robust term is \textbf{derived}, not assumed, and the $\ell_1$ term does double duty
+          (sparsity + leverage cap).
+    \item Solved with a \textbf{proximal-subgradient method}, whose prox step handles the $\ell_1$
+          penalty and the budget constraint \emph{jointly and exactly} (bisection on a scalar
+          multiplier) so soft-thresholded zeros survive. Convexity makes that local iteration
+          globally optimal; CLARABEL independently confirms it to 6 s.f.
+    \item Out of sample: six configurations walk-forward tested. Long-only beats both benchmarks
+          on a risk-adjusted basis; a per-ticker concentration cap accounts for most of that edge.
+          The \textbf{robust ($\kappa$) term does not earn its keep} either in- or out-of-sample
+          (A's own search picks $\kappa=0$ in 18 of 25 periods).
+    \item Long-short without a leverage cap suffered \textbf{total capital loss} ---
+          categorically worse, not just riskier: the sharpest empirical lesson of the study.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}
+  \centering
+  \Large \textbf{Thank you}
+  \vspace{0.5cm}
+
+  \normalsize Questions?
+\end{frame}
+
+% ============================================================
+% BACKUP SLIDES -- starred section: off the outline, no
+% AtBeginSection recap frame. Full derivations, worked
+% examples, and diagnostics kept for Q\&A, not deleted.
+% ============================================================
+\section*{Backup Slides}
+
+\begin{frame}
+  \centering
+  \Large\textbf{Backup Slides}
+  \vspace{0.3cm}
+
+  \normalsize Additional derivations, diagnostics, and results kept for Q\&A.
+\end{frame}
+
+\begin{frame}{No single formula is best for every market}
+  The literature offers several competing answers to what ``best'' should mean:
+  \begin{itemize}
+    \item plain mean--variance efficiency (Markowitz, 1952)
+    \item robustness to estimation error (Goldfarb \& Iyengar, 2003)
+    \item an explicit penalty on the number of positions held (Tibshirani, 1996; Brodie et al.,
+          2009)
+  \end{itemize}
+
+  \vspace{0.2cm}
+  Which one actually \emph{helps} depends on the market: how noisy its mean returns are, how
+  correlated its constituents are, how expensive its transaction costs are. A formula tuned on
+  US large-cap equities is not guaranteed to transfer to a 100-stock Vietnamese universe.
+
+  \vspace{0.3cm}
+  \begin{center}
+  \Large\good{Our approach:} state \textbf{one general objective}, let the data decide which
+  configuration wins \textbf{on VN100 specifically}.
+  \end{center}
+\end{frame}
 
 \begin{frame}{Decision variable and constants}
   \textbf{Decision variable:} $w \in \R^{98}$ --- fraction of capital in each stock
@@ -189,24 +484,35 @@
   }
 \end{frame}
 
-\begin{frame}{Type of problem $\Rightarrow$ how we solve it}
-  \textbf{Convex} (previous slide) $\Rightarrow$ \textbf{every local optimum is global, and
-  unique in value.}
+\begin{frame}{Convergence, and the cost of each approach}
+  \vspace{-0.1cm}
+  \begin{columns}
+    \column{0.54\textwidth}
+    \includegraphics[width=\textwidth]{fig2b_suboptimality.png}
+    \column{0.46\textwidth}
+    \scriptsize
+    With $\lambda>0$ we converge \good{faster} than the theoretical $O(1/\sqrt{k})$ rate: the exact
+    prox fixes the active set early, then the iteration works in a low-dimensional subspace.
 
-  \vspace{0.2cm}
-  \textbf{Second-order-cone representable}: an epigraph reformulation turns the two norms into
-  SOC constraints and the quadratic into a rotated SOC.
-
-  \vspace{0.3cm}
+    \vspace{0.15cm}
+    With $\lambda=0$ the curve \emph{tracks} $O(1/\sqrt{k})$ --- no sparsity for the prox to
+    exploit, so the worst case is attained, not beaten.
+  \end{columns}
+  \vspace{0.1cm}
+  \scriptsize
+  \textbf{Cost at $N=98$}, $(\kappa,\gamma,\lambda)=(1,5,0.01)$:
   \begin{center}
-  \Large $\Rightarrow$ hand this \textbf{directly to CVXPY/CLARABEL}, a general-purpose conic
-  interior-point solver.
+  \scriptsize
+  \begin{tabular}{@{}lrrl@{}}
+  \toprule
+   & Time & Iters & Per-iteration \\
+  \midrule
+  Proximal-subgradient & 146\,ms & 528 & $O(N^2)$ matvec + bisection; \good{81 exact zeros} \\
+  CLARABEL (reference) & 25\,ms  & 14  & $O(N^3)$ KKT factorization; \bad{0 exact zeros} \\
+  \bottomrule
+  \end{tabular}
   \end{center}
-  \vspace{0.2cm}
-  \small No custom algorithm needed: convexity already guarantees CLARABEL's reported optimum is
-  the \emph{global} optimum. That guarantee only becomes decisive at problem sizes where a
-  first-order method's cheaper per-iteration cost outweighs needing far more iterations --- not
-  at $N=98$.
+  \scriptsize Interior point wins $\sim6\times$ at $N=98$; ordering reverses at $N$ in the thousands.
 \end{frame}
 
 \begin{frame}{Sensitivity: what does $\gamma$ actually do?}
@@ -218,54 +524,6 @@
   \small Classical risk--return trade-off. At $\gamma=0.1$, a $137\%$-vol, $37\%$-return bet ---
   the same low-risk-aversion mechanism behind E/F's wipeout later. A/B search $\{1,5,10\}$, the
   \emph{steep} part of this curve --- why their selected $\gamma$ swings month to month.
-\end{frame}
-
-% ============================================================
-\section{One formula, six methods}
-% ============================================================
-
-\begin{frame}{From one formula to six named strategies}
-  Each variant tested later is \cref{eq:main} with certain terms fixed or dropped --- no
-  variant introduces anything not already in the general objective.
-  \vspace{0.2cm}
-  \small
-  \begin{table}
-  \begin{tabular}{@{}llccl@{}}
-  \toprule
-  \textbf{Method} & \textbf{Type} & $\kappa$ & $\lambda$ & \textbf{Notes} \\
-  \midrule
-  A: Robust Markowitz    & long-only ($w\ge0$)  & searched     & $\equiv0$ (vacuous) & robust + variance \\
-  B: Classical Markowitz & long-only ($w\ge0$)  & $\equiv0$    & $\equiv0$ (vacuous) & variance only \\
-  C: Equal-weight $1/N$  & no optimization      & --           & --                  & reset monthly \\
-  D: VN100 buy\&hold     & no optimization      & --           & --                  & set once, drift \\
-  E: Sparse-only         & long-short           & $\equiv0$    & searched            & variance + sparsity \\
-  F: Full equation       & long-short           & searched     & searched            & all four terms \\
-  \bottomrule
-  \end{tabular}
-  \end{table}
-  \vspace{0.2cm}
-  \small A/B add $w\ge0$: the simplex constraint then forces $\norm{w}_1\equiv1$, so $\lambda$ is
-  dropped from their search rather than tuned pointlessly --- any concentration A/B show is a
-  \emph{free} effect of the simplex geometry, not a designed sparsity term.
-\end{frame}
-
-% ============================================================
-\section{Walk-forward backtest}
-% ============================================================
-
-\begin{frame}{Walk-forward out-of-sample backtest}
-  \textbf{Why:} in-sample results above optimize on data already seen --- say nothing about
-  deployed performance.
-
-  \vspace{0.2cm}
-  \begin{itemize}
-    \item Rolling \textbf{24-month} window: 18 months fit + 6 months validate, sliding 1 month
-          at a time
-    \item \textbf{Monthly} rebalance, \textbf{494 out-of-sample days}, \textbf{25 rebalances}
-    \item Ledoit--Wolf shrinkage; \textbf{0.20\%} transaction cost per unit turnover
-    \item Two benchmarks built from the \emph{same} 98-ticker universe (not an external VN30
-          index): C (equal-weight, monthly) and D (VN100 buy\&hold, once)
-  \end{itemize}
 \end{frame}
 
 \begin{frame}{Walk-forward, step by step: choosing next month's weights}
@@ -287,57 +545,6 @@
   \small The window then slides forward by exactly one month and the whole process repeats ---
   25 times.
   }
-\end{frame}
-
-\begin{frame}{Rolling window, concretely: three consecutive periods}
-  \begin{center}
-  \begin{tikzpicture}[x=0.34cm, y=0.85cm, font=\scriptsize]
-    % month axis
-    \draw[->] (0,-0.4) -- (28.5,-0.4) node[right]{month};
-    \foreach \m in {1,6,12,18,24,27} {
-      \draw (\m,-0.45) -- (\m,-0.35);
-      \node[below] at (\m,-0.6) {\m};
-    }
-
-    % Period 1
-    \node[above,font=\tiny\bfseries] at (10,2.65) {Period 1};
-    \draw[fill=blue!25] (1,2.15) rectangle (19,2.65);
-    \node at (10,2.4) {$E$};
-    \draw[fill=orange!35] (19,2.15) rectangle (25,2.65);
-    \node at (22,2.4) {$V$};
-    \draw[fill=green!45] (25,2.15) rectangle (26,2.65);
-    \node[right,font=\tiny] at (26,2.4) {25};
-
-    % Period 2 -- shifted by exactly 1 month
-    \node[above,font=\tiny\bfseries] at (11,1.65) {Period 2};
-    \draw[fill=blue!25] (2,1.15) rectangle (20,1.65);
-    \node at (11,1.4) {$E$};
-    \draw[fill=orange!35] (20,1.15) rectangle (26,1.65);
-    \node at (23,1.4) {$V$};
-    \draw[fill=green!45] (26,1.15) rectangle (27,1.65);
-    \node[right,font=\tiny] at (27,1.4) {26};
-
-    % Period 3 -- shifted by another month
-    \node[above,font=\tiny\bfseries] at (12,0.65) {Period 3};
-    \draw[fill=blue!25] (3,0.15) rectangle (21,0.65);
-    \node at (12,0.4) {$E$};
-    \draw[fill=orange!35] (21,0.15) rectangle (27,0.65);
-    \node at (24,0.4) {$V$};
-    \draw[fill=green!45] (27,0.15) rectangle (28,0.65);
-    \node[right,font=\tiny] at (28,0.4) {27};
-  \end{tikzpicture}
-  \end{center}
-  \vspace{0.1cm}
-  \small
-  \textcolor{blue!55!black}{\rule{0.28cm}{0.28cm}}~Estimation $E$ (18 mo) \quad
-  \textcolor{orange!85!black}{\rule{0.28cm}{0.28cm}}~Validation $V$ (6 mo) \quad
-  \textcolor{green!50!black}{\rule{0.28cm}{0.28cm}}~Deployed month
-
-  \vspace{0.15cm}
-  The window \textbf{slides forward by exactly 1 month} each period: Period 1 and Period 2
-  share \textbf{23 of 24} months of data --- yet $(\kappa,\gamma)$ still swings between periods
-  (later slide). A 6-month validation slice is a noisy yardstick even when the underlying data
-  barely changes.
 \end{frame}
 
 \begin{frame}{Turnover and transaction cost --- worked example}
@@ -374,59 +581,6 @@
   \cref{eq:main} has no $w_{\text{prev}}$ term; a penalty $\eta\norm{w-w_{\text{prev}}}_1$ could
   be added but would be a 4th hyperparameter on an already-unstable window --- kept external to
   keep the concentration cap's attribution clean.
-\end{frame}
-
-\begin{frame}{Results: all six variants, no constraint beyond \cref{eq:main}}
-  \small
-  \begin{table}
-  \begin{tabular}{@{}lrrrrr@{}}
-  \toprule
-  \textbf{Method} & CumRet & AnnRet & Vol & Sharpe & MaxDD \\
-  \midrule
-  A: Robust (long-only)     & 37.7\%   & 17.7\%   & 30.9\%  & 0.68 & $-39.7\%$ \\
-  B: Classical (long-only)  & \good{74.2\%} & \good{32.7\%} & 31.6\% & \good{1.05} & $-39.7\%$ \\
-  C: Equal-weight $1/N$     & 14.7\%   & 7.3\%    & 19.9\%  & 0.45 & $-20.9\%$ \\
-  D: VN100 buy\&hold        & 21.5\%   & 10.4\%   & 20.1\%  & 0.59 & \good{$-20.4\%$} \\
-  E: Sparse-only (long-short) & \bad{$-100.0\%$} & \bad{$-100.0\%$} & 245.5\% & 0.55 & \bad{$-100.0\%$} \\
-  F: Full equation (long-short) & \bad{$-100.0\%$} & \bad{$-100.0\%$} & 240.8\% & 0.42 & \bad{$-100.0\%$} \\
-  \bottomrule
-  \end{tabular}
-  \end{table}
-  \begin{columns}
-    \column{0.5\textwidth}
-    \includegraphics[height=3.4cm]{fig10a_6method_equity.png}
-    \column{0.5\textwidth}
-    \includegraphics[height=3.4cm]{fig10b_6method_drawdown.png}
-  \end{columns}
-\end{frame}
-
-\begin{frame}{A concentration problem, and a constraint to fix it}
-  A and B already beat both benchmarks --- but the \emph{number of names held} swings wildly:
-  B's active count ranges \textbf{1 to 14}, mean 7.56, month to month.
-
-  \vspace{0.2cm}
-  \bad{February 2025:} B's entire portfolio concentrated in a \textbf{single ticker} (VTP) on
-  the strength of its trailing sample mean --- then lost \bad{9.47\%} the following month when
-  that edge did not persist.
-
-  \vspace{0.3cm}
-  \textbf{Fix:} add $w_i \le 1/K$ for A/B, where $K$ is an investor-chosen minimum number of
-  names to hold (genuinely convex, not a heuristic). $K=5$ gives a 20\% per-name cap.
-  \small
-  \begin{table}
-  \begin{tabular}{@{}lrrrrr@{}}
-  \toprule
-  \textbf{Method} & CumRet & AnnRet & Vol & Sharpe & MaxDD \\
-  \midrule
-  A, uncapped      & 37.7\% & 17.7\% & 30.9\% & 0.68 & $-39.7\%$ \\
-  A, capped $20\%$ & 56.8\% & 25.8\% & 21.3\% & 1.19 & $-25.0\%$ \\
-  B, uncapped      & 74.2\% & 32.7\% & 31.6\% & 1.05 & $-39.7\%$ \\
-  B, capped $20\%$ & \good{76.3\%} & \good{33.6\%} & 22.8\% & \good{1.39} & $-25.0\%$ \\
-  \bottomrule
-  \end{tabular}
-  \end{table}
-  \small The cap \emph{raises} return while \emph{cutting} vol/drawdown by a third --- it removes
-  the concentrated bets that hurt performance, not just their risk.
 \end{frame}
 
 \begin{frame}{Long-short without a leverage cap: E and F wiped out}
@@ -470,10 +624,6 @@
   }
 \end{frame}
 
-% ============================================================
-\section{Conclusion}
-% ============================================================
-
 \begin{frame}{Limitations}
   \small
   \begin{itemize}
@@ -489,22 +639,6 @@
     \item 6-month validation window causes mild parameter overfitting
     \item Single historical path --- no bootstrap confidence intervals
     \item Flat transaction-cost model, no slippage/market impact/margin calls
-  \end{itemize}
-\end{frame}
-
-\begin{frame}{Conclusion}
-  \begin{itemize}
-    \item Formulated a \textbf{convex, SOCP-representable} model (Chen et al., 2024) where the
-          robust term is \textbf{derived}, not assumed, and the $\ell_1$ term does double duty
-          (sparsity + leverage cap).
-    \item Convexity + conic representability \textbf{license solving it directly with
-          CVXPY/CLARABEL} --- every local minimum is global, no custom algorithm needed at
-          $N=98$.
-    \item Out of sample: six configurations walk-forward tested. Long-only beats both
-          benchmarks on a risk-adjusted basis; a per-ticker concentration cap accounts for most
-          of that edge and is a substantive finding, not a tuning detail.
-    \item Long-short without a leverage cap suffered \textbf{total capital loss} ---
-          categorically worse, not just riskier: the sharpest empirical lesson of the study.
   \end{itemize}
 \end{frame}
 
@@ -525,14 +659,6 @@
           Programs. 2024.
     \item Data: \texttt{vnstock} (VN100, VCI/KBS sources).
   \end{itemize}
-\end{frame}
-
-\begin{frame}
-  \centering
-  \Large \textbf{Thank you}
-  \vspace{0.5cm}
-
-  \normalsize Questions?
 \end{frame}
 
 \end{document}

@@ -1,0 +1,133 @@
+\section{Algorithm: A Proximal-Subgradient Method}\label{sec:algorithm}
+
+\subsection{Splitting the objective, and its subgradient}
+
+\Cref{sec:modeling} noted that \cref{eq:main} cannot be attacked by plain gradient descent: two
+of its four terms are nondifferentiable, and $\lambda\norm{w}_1$ is nonsmooth exactly where its
+solutions live. The response here is to \textbf{confront the nonsmoothness directly}, splitting
+the objective into a subgradient part and a part with a closed-form proximal operator:
+\begin{equation}\label{eq:split}
+f(w) \;=\; \underbrace{-\muhat^\top w + \kappa\norm{\Ssqrt w}_2 + \gamma\, w^\top\Sig w}_{g(w),
+\ \text{subgradient step}}
+\;+\; \underbrace{\lambda\norm{w}_1 + I_{\{\one^\top w = 1\}}(w)}_{h(w),\ \text{prox step}} ,
+\end{equation}
+where $I_{\mathcal{C}}$ is the convex indicator, so the budget constraint is absorbed into $h$.
+Since $g$ is itself nonsmooth at $\Ssqrt w = 0$, this is a proximal-\emph{subgradient} scheme
+\citep{parikh2014}:
+\begin{equation}\label{eq:iteration}
+w_{k+1} \;=\; \prox_{\alpha_k h}\!\bigl(w_k - \alpha_k\, v_k\bigr),
+\qquad v_k \in \partial g(w_k) \;=\; -\muhat + 2\gamma\Sig w_k +
+\begin{cases}
+\dfrac{\kappa\Sig w_k}{\norm{\Ssqrt w_k}_2}, & \norm{\Ssqrt w_k}_2 > \varepsilon,\\[4pt]
+0, & \text{otherwise,}
+\end{cases}
+\end{equation}
+with diminishing step $\alpha_k = \alpha_0/\sqrt{k+1}$, the standard choice for nonsmooth convex
+problems \citep{boyd2004}. By the chain rule, $\nabla_w\norm{\Ssqrt w}_2 = \Sig w/\norm{\Ssqrt w}_2$
+--- the full covariance $\Sig$, \textbf{not} $\Ssqrt$, in the numerator, since $\Ssqrt$ is
+symmetric with $\Ssqrt\Ssqrt = \Sig$; at the one nondifferentiable point the zero vector is a
+valid subgradient, which the second branch returns.
+
+\subsection{The prox step: an exact solve, not a heuristic}\label{sec:prox}
+
+The proximal operator of $h$ handles the budget constraint and the $\ell_1$ penalty
+\emph{jointly}:
+\begin{equation}\label{eq:proxdef}
+\prox_{t h}(z) \;=\; \arg\min_{w}\ \tfrac12\norm{w-z}_2^2 + t\lambda\norm{w}_1
+\quad\text{s.t.}\quad \one^\top w = 1 .
+\end{equation}
+A multiplier $\nu$ on the constraint makes the Lagrangian separable across coordinates, each
+solved by soft-thresholding, $w_i(\nu) = \softt_{t\lambda}(z_i+\nu)$ with
+$\softt_\tau(x)=\operatorname{sign}(x)\max(|x|-\tau,0)$; $\nu$ is chosen so
+$\phi(\nu) := \sum_i \softt_{t\lambda}(z_i+\nu) = 1$. $\phi$ is continuous, nondecreasing, and
+piecewise linear with flat segments, so no closed form exists and the implementation locates
+$\nu^\star$ by \textbf{bisection} to $10^{-12}$ (the same monotone-root-find structure as
+projection onto the simplex \citep{duchi2008}).
+
+\begin{proposition}[Exact sparsity]\label{prop:exactzero}
+At the solution of \cref{eq:proxdef}, coordinate $i$ satisfies $w_i = 0$ \emph{exactly} whenever
+$|z_i + \nu^\star| \le t\lambda$.
+\end{proposition}
+
+This is why \cref{eq:proxdef} is solved jointly rather than by soft-thresholding first and then
+projecting onto $\{\one^\top w = 1\}$: that shortcut adds the constant $(1 - \one^\top w)/N$ to
+\emph{every} coordinate, reviving each zero the threshold just created. It was implemented first
+and produced portfolios with no exact zeros at all.
+
+\subsection{Convergence, and verification against CVXPY/CLARABEL}\label{sec:verification}
+
+\begin{figure}[htbp]
+\centering
+\begin{subfigure}{0.53\textwidth}
+  \centering
+  \includegraphics[width=\textwidth]{fig2b_suboptimality.png}
+  \caption{Suboptimality vs.\ iteration, log--log, $f^\star$ from CVXPY.}
+  \label{fig:subopt}
+\end{subfigure}\hfill
+\begin{subfigure}{0.45\textwidth}
+  \centering
+  \includegraphics[width=\textwidth]{fig6_prox_vs_cvxpy.png}
+  \caption{Weight agreement, $(\kappa,\gamma,\lambda)=(1,5,0.01)$.}
+  \label{fig:proxvscvx}
+\end{subfigure}
+\caption{Left: convergence rate against the $O(1/\sqrt{k})$ subgradient reference. Right: the two
+solvers' 98 weights against $y=x$.}
+\label{fig:algorithm}
+\end{figure}
+
+Because a subgradient method is not a descent method, the implementation tracks the \textbf{best
+iterate} $\arg\min_{j\le k} f(w_j)$ (\cref{fig:subopt}). With $\lambda>0$ the method converges
+markedly faster than $O(1/\sqrt{k})$, reaching $10^{-8}$ suboptimality within a few hundred
+iterations, because the exact prox fixes the active set early; with $\lambda=0$ the curve tracks
+$O(1/\sqrt{k})$ almost exactly, since there is no sparsity left for the prox to exploit.
+
+Convexity (\cref{sec:correctness}) guarantees \emph{any} correct solver reaches the global
+optimum, but says nothing about whether this implementation is correct --- a sign error or an
+early-terminating bisection would return a feasible-looking $w$ silently. Every result is
+therefore cross-checked against CVXPY \citep{diamond2016}/CLARABEL \citep{clarabel2024} on the
+conic reformulation \cref{eq:socp}, an interior-point method sharing no code with
+\cref{eq:iteration}.
+
+\begin{table}[htbp]
+\centering
+\caption{Proximal-subgradient solver against CVXPY/CLARABEL, full return panel. Relative gap
+$=(f_{\text{prox}}-f^\star)/|f^\star|$; Jaccard compares active sets at $|w_i|>10^{-4}$;
+$\ell_\infty = \norm{w_{\text{prox}} - w_{\text{cvx}}}_\infty$.}
+\label{tab:verification}
+\small
+\begin{tabular}{@{}rrrrrrrrr@{}}
+\toprule
+$\kappa$ & $\gamma$ & $\lambda$ & Rel.\ gap & Active & Jaccard & $\ell_\infty$ & Iters & Conv. \\
+\midrule
+$2$   & $10$ & $0.005$ & $-1.1\times10^{-8}$ & $22/22$ & $1.00$ & $7.5\times10^{-5}$ & $303$  & yes \\
+$1$   & $5$  & $0.010$ & $1.9\times10^{-7}$  & $17/17$ & $1.00$ & $5.7\times10^{-4}$ & $528$  & yes \\
+$1$   & $5$  & $0$     & $5.1\times10^{-7}$  & $98/98$ & $1.00$ & $4.1\times10^{-4}$ & $782$  & yes \\
+$0.5$ & $1$  & $0.020$ & $1.8\times10^{-6}$  & $18/18$ & $1.00$ & $3.0\times10^{-3}$ & $1302$ & yes \\
+$0$   & $5$  & $0.100$ & $7.8\times10^{-6}$  & $10/10$ & $1.00$ & $1.7\times10^{-2}$ & $2113$ & yes \\
+$0$   & $5$  & $0$     & $2.0\times10^{-2}$  & $98/98$ & $1.00$ & $1.6\times10^{-1}$ & $5000$ & \textbf{no} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The two solvers select \textbf{identical active sets} throughout (Jaccard $=1.00$) and agree on
+the objective to $10^{-8}$--$10^{-6}$ relative terms on the five configurations that converge ---
+six significant figures, from algorithms sharing no code. \Cref{fig:proxvscvx} shows the same
+agreement coordinate by coordinate. The one failure is reported rather than hidden: with
+$\kappa=\lambda=0$ both nonsmooth terms vanish, yet this is the only configuration that does not
+reach tolerance within 5000 iterations, stalling at $2.0\%$ --- the diminishing step mandated for
+the nonsmooth case is needlessly conservative on what is now a smooth quadratic, which has a
+closed form (\cref{sec:correctness}) used elsewhere as an independent check.
+
+\subsection{Cost of the two approaches}\label{sec:cost}
+
+At $(\kappa,\gamma,\lambda) = (1,5,0.01)$ the proximal-subgradient method takes $146$\,ms over
+$528$ iterations ($O(N^2)$ matrix--vector product plus a bisection each); CLARABEL takes
+$25$\,ms over $14$ iterations ($O(N^3)$ KKT factorization each, superlinear residual reduction).
+At $N=98$ the cubic term is cheap and CLARABEL wins by $\sim6\times$; the ordering would reverse
+at $N$ in the thousands. Two considerations favour the first-order method beyond satisfying the
+gradient-based requirement: it returns \textbf{exact zeros} ($81$ at the setting above, vs.\
+CLARABEL's $10^{-9}$--$10^{-6}$ residuals) --- justifying the $10^{-4}$ active threshold used
+elsewhere, since \cref{tab:verification} shows the two agree exactly on which coordinates those
+are --- and it extends to objectives that are not conic-representable, where CLARABEL cannot be
+applied at all. Both solvers are retained: \cref{eq:iteration} as the implementation, CLARABEL as
+the reference that certifies it.

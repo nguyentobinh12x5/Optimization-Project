@@ -34,17 +34,73 @@ defect rather than on the calendar. The threshold is deliberately high: genuine 
 flat days are possible in principle, and a lower threshold risks discarding real sessions. As
 noted in \cref{sec:data}, this filter removes no rows from the present panel.
 
-\section{The Effect of the Robust Term}\label{app:robust}
+\section{Additional In-Sample Figures}\label{app:robust}
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.62\textwidth]{fig5_robust_effect.png}
+\includegraphics[width=0.6\textwidth]{fig5_robust_effect.png}
 \caption{Active positions and Herfindahl--Hirschman index as $\kappa$ increases from $0$ to $1$
 with $\gamma$ and $\lambda$ held fixed. Both rise: the portfolio becomes more concentrated, not
 more diversified. The mechanism --- degree-one homogeneity of the robust term --- is discussed in
 \cref{sec:insample}.}
 \label{fig:robust}
 \end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.75\textwidth]{fig4_weights_bar.png}
+\caption{Portfolio weights at a small $\lambda$ (denser) against a large $\lambda$ (sparser). The
+large-$\lambda$ portfolio concentrates in the few tickers with the best marginal contribution to
+the objective; the remaining weights are below the $10^{-4}$ active threshold, not merely small
+relative to the active ones.}
+\label{app:weights}
+\end{figure}
+
+\section{Explicit Objectives for Each Backtest Variant}\label{app:variants}
+
+\Cref{tab:variants} summarizes the six variants of \cref{sec:backtest}; this appendix gives each
+one's objective explicitly, each obtained from \cref{eq:main} by fixing or dropping specific
+terms --- no variant introduces a term not already present in the general model. A and B
+additionally impose $w\ge0$ here, and pick up the concentration constraint of \cref{sec:cap} only
+in \cref{tab:beforeafter}. C and D solve no optimization problem at all.
+
+\textbf{A} (robust, long-only) --- $\kappa$ and $\gamma$ searched, $\lambda\equiv0$ (vacuous under
+the simplex, \cref{eq:leverage}):
+\[
+\min_{w\ge0,\ \mathbf1^\top w=1}\ -\muhat^\top w
+  \;+\; \underbrace{\kappa\norm{\Ssqrt w}_2}_{\text{robustness}}
+  \;+\; \underbrace{\gamma\, w^\top\Sig w}_{\text{variance}}
+\]
+
+\textbf{B} (classical, long-only) --- $\kappa\equiv0$ (robust term off), $\gamma$ searched,
+$\lambda\equiv0$ (same vacuity as A: B is exactly A with the robust term switched off, nothing
+else differs):
+\[
+\min_{w\ge0,\ \mathbf1^\top w=1}\ -\muhat^\top w
+  \;+\; \underbrace{\gamma\, w^\top\Sig w}_{\text{variance}}
+\]
+
+\textbf{C} (equal-weight $1/N$) and \textbf{D} (VN100 buy\&hold) --- $w_i = 1/N$ for every $i$, no
+objective solved: C resets to $1/N$ every month, D sets it once and lets it drift untouched.
+
+\textbf{E} (sparse-only, long-short) --- $\kappa\equiv0$ (robust off), $\gamma$ searched, $\lambda$
+searched over a real grid, the only variant where sparsity is a \emph{designed} choice rather than
+a byproduct:
+\[
+\min_{\mathbf1^\top w=1}\ -\muhat^\top w
+  \;+\; \underbrace{\gamma\, w^\top\Sig w}_{\text{variance}}
+  \;+\; \underbrace{\lambda\norm{w}_1}_{\text{sparsity / leverage}}
+\]
+
+\textbf{F} (full equation, long-short) --- $\kappa$, $\gamma$, $\lambda$ all searched:
+\cref{eq:main} exactly as stated, no term fixed and no exposure constraint added, which
+\cref{sec:ef} shows is precisely the combination that fails:
+\[
+\min_{\mathbf1^\top w=1}\ -\muhat^\top w
+  \;+\; \underbrace{\kappa\norm{\Ssqrt w}_2}_{\text{robustness}}
+  \;+\; \underbrace{\gamma\, w^\top\Sig w}_{\text{variance}}
+  \;+\; \underbrace{\lambda\norm{w}_1}_{\text{sparsity / leverage}}
+\]
 
 \section{Transaction-Cost Worked Example}\label{app:timeline}
 
@@ -79,12 +135,58 @@ the month. For the very first period of the backtest there is no previous portfo
 against, so \texttt{prev} is treated as all zero and turnover $= \sum_i w_i = 1$ exactly (a full
 purchase from cash), matching the $100\%$ first-period turnover stated in \cref{sec:backtest}.
 
+\section{Why Transaction Cost Is Kept External to the Objective}\label{app:turnover-design}
+
+\Cref{sec:interpretation} treats transaction cost as a friction applied \emph{after} $w^\star$ is
+chosen --- \cref{eq:main} has no term that sees $w_{\text{prev}}$ at all, so the optimizer that
+picks $\gamma=1$ this month has no way to know that doing so will force a $60\%$ turnover against
+last month's holdings. The natural alternative is to add a turnover penalty
+$\eta\norm{w-w_{\text{prev}}}_1$ directly to \cref{eq:main} at each rebalance, letting the
+optimizer trade expected return against \emph{both} risk and rebalancing cost simultaneously,
+the standard treatment in the transaction-cost portfolio literature. Three reasons this report
+keeps cost external instead:
+
+First, \cref{eq:main} is stated and solved once in \cref{sec:insample} as a single-period
+problem, and $w_{\text{prev}}$ is meaningful only in the multi-period walk-forward setting of
+\cref{sec:backtest} --- folding it in would mean the core model of \cref{sec:modeling} is no
+longer the same model actually deployed, which this report's structure deliberately avoids.
+Second, $\eta$ would be a fourth hyperparameter selected on the same six-month validation window
+already shown (\cref{sec:results7}, \cref{fig:selectedparams}) to select $\gamma$ unstably ---
+adding a cost-aware term without first fixing that instability risks fitting $\eta$ to six months
+of noise rather than to a genuine cost--return trade-off. Third, and most concretely, the
+concentration cap of \cref{sec:cap} was added \emph{because} of a diversification concern
+(\cref{app:backtest}), not a cost concern, yet it happens to cut A's and B's turnover as a side
+effect --- keeping cost external keeps that attribution clean: \cref{tab:beforeafter}'s
+improvement is demonstrably from the cap, not confounded with a simultaneously-tuned cost
+penalty. A cost-aware variant, $\eta\norm{w-w_{\text{prev}}}_1$ added once the $\gamma$-selection
+instability above is addressed, is left as the natural next extension rather than folded in here.
+
 \section{Backtest Diagnostics}\label{app:backtest}
 
-Equity and drawdown curves for all six variants appear in the main body
-(\cref{fig:equity6,fig:drawdown6}); Method B's month-by-month active-position count, the trace behind
-\cref{sec:cap}'s concentration diagnosis, is shown inline there as \cref{tab:bmonthly}. This
-appendix gives the remaining per-period detail, method A's turnover.
+\begin{table}[htbp]
+\centering
+\caption{Method B (uncapped), active positions by month --- the trace behind the concentration
+constraint of \cref{sec:cap}. Mean $7.56$, range $1$--$14$.}
+\label{tab:bmonthly}
+\small
+\begin{tabular}{@{}lr@{\hspace{18pt}}lr@{\hspace{18pt}}lr@{}}
+\toprule
+Month & $n$ & Month & $n$ & Month & $n$ \\
+\midrule
+2024-07 & 12 & 2025-02 & 1  & 2025-09 & 14 \\
+2024-08 & 10 & 2025-03 & 2  & 2025-10 & 2  \\
+2024-09 & 9  & 2025-04 & 2  & 2025-11 & 9  \\
+2024-10 & 9  & 2025-05 & 3  & 2025-12 & 3  \\
+2024-11 & 7  & 2025-06 & 12 & 2026-01 & 10 \\
+2024-12 & 12 & 2025-07 & 10 & 2026-02 & 11 \\
+2025-01 & 12 & 2025-08 & 12 & 2026-03 & 4  \\
+        &    &         &    & 2026-04 & 2  \\
+        &    &         &    & 2026-05 & 7  \\
+        &    &         &    & 2026-06 & 6  \\
+        &    &         &    & 2026-07 & 8  \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \begin{figure}[htbp]
 \centering
@@ -97,6 +199,22 @@ cap of \cref{sec:backtest} --- the visual evidence for the turnover diagnosis in
 that the robust term does not earn its keep on this data.}
 \label{fig:selectedparams}
 \end{figure}
+
+\section{Code Listings}\label{app:code}
+
+The three modules below implement the core contribution of this report: the estimators feeding
+\cref{eq:main}, the proximal-subgradient solver of \cref{sec:algorithm}, and the walk-forward
+backtest of \cref{sec:backtest}. Full source, with tests, is in the accompanying code submission;
+these are reproduced verbatim.
+
+\subsection{\texttt{src/estimators.py}}
+\lstinputlisting[language=Python]{code/estimators.py}
+
+\subsection{\texttt{src/prox\_solver.py}}
+\lstinputlisting[language=Python]{code/prox_solver.py}
+
+\subsection{\texttt{src/backtest.py}}
+\lstinputlisting[language=Python]{code/backtest.py}
 
 \section{Reproduction}\label{app:repro}
 

@@ -3,30 +3,29 @@
 \subsection{Decision Variable and Constants}
 
 The \textbf{decision variable} is the weight vector $w \in \R^{N}$ with $N = 98$, where $w_i$
-is the fraction of total capital allocated to stock $i$. A negative $w_i$ denotes a short
+is the fraction of total capital allocated to stock $i$; a negative $w_i$ denotes a short
 position.
 
-The \textbf{constants} are the statistical inputs, estimated from historical data before the
-optimization runs and held fixed while it does: $\muhat \in \R^{N}$, the sample mean of daily
-returns; $\Sig \in \mathbb{S}^{N}_{+}$, their sample covariance; and $\Ssqrt$, the symmetric
-positive-semidefinite square root of $\Sig$, so that $\Ssqrt\Ssqrt = \Sig$. The three scalars $\kappa, \gamma, \lambda \ge 0$ are \textbf{hyperparameters, not decision
-variables}. The optimizer treats them as fixed constants; they are chosen by the modeller when
-exploring the solution family (\cref{sec:insample}) or by validation on held-out data
-(\cref{sec:backtest}).
+The \textbf{constants} are statistical inputs estimated from historical data before optimization
+and held fixed while it runs: $\muhat \in \R^{N}$, the sample mean of daily returns;
+$\Sig \in \mathbb{S}^{N}_{+}$, their sample covariance; and $\Ssqrt$, the symmetric
+positive-semidefinite square root of $\Sig$, so $\Ssqrt\Ssqrt = \Sig$. The scalars
+$\kappa, \gamma, \lambda \ge 0$ are \textbf{hyperparameters, not decision variables}: the
+optimizer treats them as fixed, chosen by the modeller when exploring the solution family
+(\cref{sec:insample}) or by validation on held-out data (\cref{sec:backtest}).
 
-All quantities are in \textbf{daily} return units. No annualization occurs inside the
-optimizer; annualized figures appear only in the performance table of \cref{sec:backtest}.
+All quantities are in \textbf{daily} return units; annualized figures appear only in the
+performance table of \cref{sec:backtest}.
 
 \subsection{Objective Function}
 
 The general objective combining all four terms of \cref{sec:identification} follows the robust
 and sparse mean--variance formulation of \citet{chen2024}, adopted here as the single unifying
-model for this report rather than derived from scratch: their model is the origin of the
-$\kappa\norm{\Ssqrt w}_2$ robustness term and the $\lambda\norm{w}_1$ sparsity term appearing
-together with the classical Markowitz return and variance terms. \Cref{sec:backtest} makes
-precise how each of the six named variants tested there is obtained from this one objective by
-fixing or dropping specific terms --- no variant introduces a term that is not already present
-here. The optimization problem is
+model rather than derived from scratch: their model is the origin of the $\kappa\norm{\Ssqrt w}_2$
+robustness term and the $\lambda\norm{w}_1$ sparsity term alongside the classical Markowitz return
+and variance terms. \Cref{sec:backtest} makes precise how each of the six variants tested there is
+obtained from this one objective by fixing or dropping terms --- no variant introduces anything
+not already present here. The optimization problem is
 \begin{equation}\label{eq:main}
 \min_{w \in \R^{N}} \quad
   \underbrace{-\muhat^\top w}_{\text{expected return}}
@@ -38,8 +37,8 @@ here. The optimization problem is
 
 \begin{table}[htbp]
 \centering
-\caption{The role of each term in \cref{eq:main}. The four terms correspond one-to-one with
-the four competing objectives identified in \cref{sec:identification}.}
+\caption{The role of each term in \cref{eq:main}, corresponding one-to-one with the four
+competing objectives of \cref{sec:identification}.}
 \label{tab:terms}
 \small
 \begin{tabular}{@{}ll@{}}
@@ -47,10 +46,10 @@ the four competing objectives identified in \cref{sec:identification}.}
 \textbf{Term} & \textbf{Role} \\
 \midrule
 $-\muhat^\top w$
-  & Minimizing the negative expected return is maximizing expected return. \\[2pt]
+  & Minimizing negative expected return is maximizing expected return. \\[2pt]
 $\kappa \norm{\Ssqrt w}_2$
-  & Worst-case adjustment for uncertainty in $\muhat$; $\kappa$ sets how cautious. \\
-  & Derived rather than assumed in \cref{sec:correctness}. \\[2pt]
+  & Worst-case adjustment for uncertainty in $\muhat$; $\kappa$ sets how cautious.
+    Derived in \cref{sec:correctness}. \\[2pt]
 $\gamma\, w^\top \Sig w$
   & Portfolio variance; $\gamma$ is the risk-aversion coefficient. \\[2pt]
 $\lambda \norm{w}_1$
@@ -61,67 +60,55 @@ $\lambda \norm{w}_1$
 
 \subsection{Constraints}
 
-The single explicit constraint is the \textbf{budget constraint} $\one^\top w = 1$: the
-portfolio is fully invested. \textbf{There is no constraint $w \ge 0$} --- short selling is
-permitted, a deliberate decision made at the outset rather than an omission, and one to keep in
-mind when reading \cref{sec:insample}, since a reader who assumes a long-only portfolio will
-misinterpret every weight reported there. \Cref{sec:backtest} does add $w \ge 0$ for the deployed
-strategy, and explains there why the out-of-sample study is long-only while the in-sample study
-is not.
+The single explicit constraint is the \textbf{budget constraint} $\one^\top w = 1$: fully
+invested. \textbf{There is no constraint $w \ge 0$} --- short selling is permitted, a deliberate
+choice, not an omission, to bear in mind in \cref{sec:insample}. \Cref{sec:backtest} does add
+$w \ge 0$ for the deployed strategy and explains why the out-of-sample study is long-only while
+the in-sample study is not.
 
 \subsection{Type of Optimization Problem}
 
 Problem \cref{eq:main} is \textbf{convex, nondifferentiable, and second-order-cone
-representable}. The convexity argument is given in \cref{sec:correctness}; the conic
-representability is established by exhibiting the epigraph reformulation
+representable}. Convexity is argued in \cref{sec:correctness}; conic representability follows
+from the epigraph reformulation
 \begin{equation}\label{eq:socp}
 \begin{aligned}
 \min_{w,\,t,\,s,\,u} \quad & -\muhat^\top w + \kappa t + \gamma s + \lambda \one^\top u \\
 \text{s.t.} \quad
-  & \norm{\Ssqrt w}_2 \le t, \\
-  & \norm{\Ssqrt w}_2^2 \le s, \\
-  & -u_i \le w_i \le u_i, \quad i = 1,\dots,N, \\
-  & \one^\top w = 1 .
+  & \norm{\Ssqrt w}_2 \le t, \quad
+    \norm{\Ssqrt w}_2^2 \le s, \quad
+    -u_i \le w_i \le u_i\ (i=1,\dots,N), \quad
+    \one^\top w = 1 .
 \end{aligned}
 \end{equation}
-The first constraint is a second-order cone constraint on $(\Ssqrt w, t)$; the second is a
-rotated second-order cone, using $w^\top \Sig w = \norm{\Ssqrt w}_2^2$; the third is the standard
-linear splitting of the $\ell_1$ norm, tight at the optimum because $\lambda \ge 0$ pushes each
-$u_i$ down to $|w_i|$; the fourth is affine. Every constraint is thus affine or conic and the
-objective linear in $(w,t,s,u)$, so \cref{eq:main} is a second-order cone program --- exactly the
-class of problem a conic interior-point solver handles directly, which is why \cref{sec:insample}
-hands \cref{eq:main} straight to CVXPY/CLARABEL rather than deriving a custom algorithm.
+The first constraint is a second-order cone on $(\Ssqrt w, t)$; the second is a rotated
+second-order cone, using $w^\top \Sig w = \norm{\Ssqrt w}_2^2$; the third is the standard linear
+splitting of the $\ell_1$ norm, tight at the optimum since $\lambda \ge 0$; the fourth is affine.
+Every constraint is affine or conic and the objective linear in $(w,t,s,u)$, so \cref{eq:main} is
+a second-order cone program --- exactly what CLARABEL, the independent reference against which
+\cref{sec:verification} checks this report's own solver, is built for.
 
-Nondifferentiability is why \cref{eq:main} cannot be solved by plain gradient descent as stated:
-two of the four terms are nonsmooth, $\kappa\norm{\Ssqrt w}_2$ failing to be differentiable
-wherever $\Ssqrt w = 0$, and $\lambda\norm{w}_1$ at every point where some $w_i$ is zero --- which,
-for a penalty whose purpose is to drive coordinates to zero, is exactly where the solution lives.
-The epigraph reformulation \cref{eq:socp} sidesteps this rather than confronting it: introducing
-$(t,s,u)$ moves every nonsmooth term into a conic \emph{constraint}, leaving a linear objective
-over smooth (affine and conic) constraints, which is the form an interior-point method is built
-to solve.
+Nondifferentiability is why \cref{eq:main} cannot be solved by plain gradient descent: two terms
+are nonsmooth, $\kappa\norm{\Ssqrt w}_2$ at $\Ssqrt w = 0$ and $\lambda\norm{w}_1$ wherever some
+$w_i = 0$ --- exactly where sparse solutions live. This report responds two ways: \cref{eq:socp}
+\emph{sidesteps} the nonsmoothness, moving every nonsmooth term into a conic constraint for an
+interior-point solve; \cref{sec:algorithm} instead \emph{confronts} it, splitting the objective
+into a subgradient part and a part with a closed-form proximal operator --- the method actually
+implemented, with the conic route kept as the verifier.
 
 \subsection{Modeling Assumptions}
 
-The model rests on the following assumptions, stated as assumptions rather than facts:
-
 \begin{enumerate}
-  \item Daily returns are drawn from a distribution whose first two moments are stable across
-        the estimation window, so that a sample mean and sample covariance are meaningful
-        inputs to a forward-looking decision.
-  \item The historical estimates $\muhat$ and $\Sig$ are the relevant inputs; the model
-        contains no separate forecasting layer.
-  \item Capital is perfectly divisible, so fractional share quantities are permitted.
-  \item There are no position limits, sector limits, or liquidity limits beyond the budget
-        constraint.
-  \item Transaction costs are \emph{absent} from \cref{eq:main}. They are reintroduced only in
-        the backtest of \cref{sec:backtest}, at $0.20\%$ of turnover per rebalance, as a
-        post-hoc evaluation deduction rather than a term the optimizer sees --- the trade-offs
-        of that design choice, and why a turnover penalty is not simply added to \cref{eq:main}
-        instead, are discussed once the empirical cost impact is on the table
-        (\cref{sec:results7}).
-  \item Short positions, where they occur, are assumed executable without borrowing cost, and
-        portfolio weights are assumed re-set at each evaluation point rather than allowed to
-        drift --- except in \cref{sec:backtest}, where both drift between rebalances and the
-        cost of correcting it are modelled explicitly.
+  \item Daily returns are drawn from a distribution whose first two moments are stable across the
+        estimation window, so a sample mean and covariance are meaningful forward-looking inputs.
+  \item $\muhat$ and $\Sig$ are the only inputs; the model contains no separate forecasting layer.
+  \item Capital is perfectly divisible, and there are no position, sector, or liquidity limits
+        beyond the budget constraint.
+  \item Transaction costs are \emph{absent} from \cref{eq:main}, reintroduced only in the
+        backtest at $0.20\%$ of turnover per rebalance as a post-hoc deduction rather than a term
+        the optimizer sees --- the trade-offs of that choice are discussed once the empirical
+        cost impact is on the table (\cref{sec:results7}).
+  \item Short positions are assumed executable without borrowing cost, and weights re-set at each
+        evaluation point --- except in \cref{sec:backtest}, where drift between rebalances and
+        the cost of correcting it are modelled explicitly.
 \end{enumerate}

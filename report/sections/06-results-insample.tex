@@ -3,111 +3,90 @@
 \subsection{Estimating the inputs}
 
 $\muhat$ is the column-wise sample mean of the return panel and $\Sig$ its sample covariance
-($\text{ddof} = 1$), symmetrized. The square root $\Ssqrt$ is built by \textbf{eigendecomposition
-rather than Cholesky factorization}: a sample covariance estimated with $N = 98$ from $T = 965$
-observations is positive \emph{semi}definite at best and in floating point carries a few
-marginally negative eigenvalues, on which Cholesky --- requiring strict positive definiteness ---
-simply fails. The implementation computes $\Sig = V\operatorname{diag}(\ell)V^\top$, clips
-negative $\ell_i$ to zero, and sets $\Ssqrt = V\operatorname{diag}(\sqrt{\ell})V^\top$,
-reconstructing $\Sig$ to $\norm{\Ssqrt\Ssqrt - \Sig}_F / \norm{\Sig}_F = 1.831 \times 10^{-15}$.
-The same near-boundary issue recurs when $\Sig$ is handed to CVXPY: it rejects a covariance
-matrix that is not strictly positive semidefinite in floating point, so the code wraps $\Sig$ in
-\texttt{cp.psd\_wrap} to suppress that check. This relaxes the same numerical tolerance as
-clipping negative eigenvalues above, and does not alter the data passed to the solver.
+($\text{ddof} = 1$), symmetrized. $\Ssqrt$ is built by \textbf{eigendecomposition rather than
+Cholesky}: at $N=98$, $T=965$, the sample covariance is positive \emph{semi}definite at best, with
+a few marginally negative eigenvalues in floating point on which Cholesky --- requiring strict
+positive definiteness --- fails. The implementation clips negative eigenvalues to zero and
+reconstructs $\Sig$ to relative Frobenius error $1.831\times10^{-15}$; the same near-boundary
+tolerance is relaxed via \texttt{cp.psd\_wrap} when $\Sig$ is passed to CVXPY, without altering the
+data the solver sees.
 
 \subsection{Solving the problem, and the effect of $\lambda$}
 
-Problem \cref{eq:main} is solved directly with CVXPY \citep{diamond2016}, calling CLARABEL
-\citep{clarabel2024} on the conic reformulation \cref{eq:socp}. \Cref{tab:demo} reports two
-representative solves on the full return panel. In both, $\one^\top w = 1$ holds to $10^{-12}$.
-``Active'' means $|w_i| > 10^{-4}$: an interior-point method does not produce exact zeros the way
-a proximal step would, so coordinates it drives toward zero settle in the $10^{-9}$--$10^{-6}$
-range rather than landing on it exactly (the largest such residual across both solves below is
-$8.7\times10^{-6}$, four orders of magnitude below the active threshold) --- so the active count
-is a judgement call at a fixed, generous threshold, not an exact combinatorial statement.
+Problem \cref{eq:main} is solved with the proximal-subgradient method of \cref{sec:algorithm},
+every solve cross-checked against CVXPY/CLARABEL (\cref{sec:verification}). \Cref{tab:demo}
+reports two representative solves; $\one^\top w = 1$ holds to $10^{-12}$ and the objectives agree
+to six significant figures. ``Active'' means $|w_i| > 10^{-4}$ --- needed only for the
+interior-point reference, which drives inactive coordinates to $10^{-9}$--$10^{-6}$ rather than
+zero; the proximal step returns exact zeros (\cref{prop:exactzero}) that match CLARABEL's active
+set exactly (\cref{tab:verification}), so the counts below are exact, not threshold-dependent.
 
 \begin{table}[htbp]
 \centering
-\caption{Two representative solves on the full return panel, via CVXPY/CLARABEL.}
+\caption{Two representative solves on the full return panel. Objectives agree to six significant
+figures across solvers (\cref{tab:verification}).}
 \label{tab:demo}
 \small
 \begin{tabular}{@{}lrrrr@{}}
 \toprule
-$(\kappa,\gamma,\lambda)$ & Solver iterations & Objective & Active $(|w_i| > 10^{-4})$ \\
+$(\kappa,\gamma,\lambda)$ & Prox iters & CLARABEL iters & Objective & Active \\
 \midrule
-$(1,\, 5,\, 0.01)$ & 14 & 0.015302 & 17 / 98 \\
-$(0,\, 5,\, 0.10)$ & 11 & 0.099071 & 10 / 98 \\
+$(1,\, 5,\, 0.01)$ & 528  & 14 & 0.015302 & 17 / 98 \\
+$(0,\, 5,\, 0.10)$ & 2113 & 11 & 0.099071 & 10 / 98 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.55\textwidth]{fig3_sparsity_path.png}
-\caption{Active positions against $\lambda$ as it sweeps a logarithmic grid.}
-\label{fig:sparsity}
+\begin{subfigure}{0.38\textwidth}
+  \centering
+  \includegraphics[width=\textwidth]{fig3_sparsity_path.png}
+  \caption{Active positions vs.\ $\lambda$.}
+  \label{fig:sparsity}
+\end{subfigure}\hfill
+\begin{subfigure}{0.58\textwidth}
+  \centering
+  \includegraphics[width=\textwidth]{fig_gamma_sensitivity.png}
+  \caption{Return/volatility vs.\ $\gamma$.}
+  \label{fig:gammasens}
+\end{subfigure}
+\caption{Left: active positions against $\lambda$, logarithmic grid. Right: expected return and
+volatility as $\gamma$ sweeps $[0.1,100]$, $\kappa=\lambda=0$ fixed.}
+\label{fig:lambdagamma}
 \end{figure}
 
-\Cref{fig:sparsity} traces active positions as $\lambda$ sweeps a logarithmic grid. The count
-falls as $\lambda$ rises but \textbf{not strictly monotonically}, for a structural rather than
-numerical reason: raising the $\ell_1$ weight shifts where the budget constraint $\one^\top w=1$
-binds, so a larger $\lambda$ can move a coordinate's marginal trade-off far enough for it to
-re-enter the active set even as others leave. The trend is unambiguous; the monotonicity is not,
-and the figure is reported as it is rather than smoothed.
+Active positions fall monotonically from $89$ to $17$ and then \textbf{plateau} across the top
+decade and a half of the grid (\cref{fig:sparsity}) --- not a numerical floor but a direct
+consequence of \cref{eq:leverage}: at $\lambda \approx 4\times10^{-3}$ the last short position
+closes and $\norm{w}_1$ reaches exactly $1$, so $\lambda\norm{w}_1 \equiv \lambda$ becomes a
+constant that stops discriminating between feasible points. This is the same vacuity
+\cref{sec:backtest} invokes to drop $\lambda$ from A/B's search grids, reached here
+\emph{endogenously} rather than imposed by $w\ge0$: sparsity and the elimination of short selling
+are one effect of $\lambda$ on this universe, not two.
 
 \subsection{The effect of \texorpdfstring{$\gamma$}{gamma}}\label{sec:gammasensitivity}
 
-$\gamma$ is the risk-aversion coefficient of \cref{eq:main}: \cref{fig:gammasens} sweeps it over
-$[0.1, 100]$ with $\kappa=\lambda=0$ held fixed (the general, short-selling-permitted model, so
-that the effect of $\gamma$ alone is isolated from the constraints A/B add later), and reports
-the deployed portfolio's expected return $\muhat^\top w^\star$ and volatility
-$\sqrt{w^{\star\top}\Sig w^\star}$ at each value.
-
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.85\textwidth]{fig_gamma_sensitivity.png}
-\caption{Portfolio expected return and volatility as $\gamma$ sweeps $[0.1,100]$ on a log grid,
-$\kappa=\lambda=0$ fixed. Both fall by roughly three orders of magnitude across the sweep.}
-\label{fig:gammasens}
-\end{figure}
-
-Both curves fall monotonically and smoothly --- unlike the $\lambda$ sweep above, there is no
-structural non-monotonicity here, because $\gamma$ enters \cref{eq:main} through a strictly
-convex quadratic rather than a piecewise-linear penalty whose active set can reorganize. At the
-low end ($\gamma=0.1$), with no long-only constraint and no leverage cap, the optimizer is
-willing to take a $137\%$-volatility, $37\%$-expected-daily-return position --- an extreme,
-heavily-levered bet that is only sane in-sample against a fixed $\muhat$, and is the same
-mechanism (small effective risk-aversion, unbounded short-selling) that \cref{sec:ef} later shows
-produces catastrophic losses out of sample. At the high end ($\gamma=100$), both curves flatten
-toward the minimum-variance corner of the mean--variance frontier: return and volatility are both
-small and further increases in $\gamma$ buy little additional risk reduction. The two long-only
-variants tested in \cref{sec:backtest} search $\gamma\in\{1,5,10\}$, a range chosen to sit in the
-steep, sensitive part of this curve rather than either extreme --- consistent with the finding
-there that $\gamma$'s selected value swings between adjacent months rather than settling
-(\cref{sec:results7}): in this steep region, a small shift in the estimated $\muhat,\Sig$ from one
-month to the next can move the validation-optimal $\gamma$ substantially.
-
-\begin{figure}[htbp]
-\centering
-\includegraphics[width=0.85\textwidth]{fig4_weights_bar.png}
-\caption{Portfolio weights at a small $\lambda$ (denser) against a large $\lambda$ (sparser).
-The large-$\lambda$ portfolio concentrates in the few tickers with the best marginal
-contribution to the objective; the remaining weights are below the $10^{-4}$ active threshold,
-not merely small relative to the active ones.}
-\label{fig:weights}
-\end{figure}
+\Cref{fig:gammasens} sweeps the risk-aversion coefficient $\gamma$ over $[0.1,100]$ with
+$\kappa=\lambda=0$ fixed, isolating its effect from the constraints A/B add later. Both curves
+fall monotonically and smoothly --- unlike the $\lambda$ sweep, $\gamma$ enters through a strictly
+convex quadratic with no active set to reorganize. At $\gamma=0.1$ the optimizer takes a
+$137\%$-volatility, $37\%$-return position, an unconstrained-leverage bet only sane against a
+fixed in-sample $\muhat$ and the same mechanism \cref{sec:ef} later shows causes catastrophic
+out-of-sample losses; at $\gamma=100$ both curves flatten near the minimum-variance corner. The
+long-only variants of \cref{sec:backtest} search $\gamma\in\{1,5,10\}$, the steep part of this
+curve --- consistent with $\gamma$'s selected value swinging month to month rather than settling
+(\cref{sec:results7}).
 
 \subsection{The effect of the robust term}
 
-Raising $\kappa$ from $0$ to $1$ with $\gamma, \lambda$ fixed \textbf{increases} both the number
-of active positions and the Herfindahl--Hirschman concentration index: the portfolio becomes
-\emph{more} concentrated, where the folk intuition --- robust means cautious means diversified
---- predicts the opposite. The mechanism is the degree-one homogeneity of
-\cref{eq:robust-derivation}: because $\kappa\norm{\Ssqrt w}_2$ is a norm rather than a squared
-norm, its subgradient $\kappa\,\Sig w / \norm{\Ssqrt w}_2$ does \emph{not} shrink in magnitude as
-$\norm{w}$ shrinks, unlike the variance gradient $2\gamma\Sig w$, so it exerts a scale-independent
-pull in a fixed direction --- which, given a covariance matrix dominated by a single market
-factor, is served more efficiently by concentrating weight along a low-variance combination of a
-few names than by spreading it across many correlated ones. This is an empirical observation on
-one dataset with a plausible mechanism, \emph{not} a theorem about every $\Sig$.
-\Cref{app:robust} gives the figure.
+Raising $\kappa$ from $0$ to $1$ \textbf{increases} both active positions and concentration
+(Herfindahl--Hirschman index; \cref{app:robust}) --- the opposite of the folk intuition that
+robust means diversified. The mechanism is degree-one homogeneity (\cref{eq:robust-derivation}):
+$\kappa\norm{\Ssqrt w}_2$'s subgradient does not shrink with $\norm{w}$ the way the variance
+gradient $2\gamma\Sig w$ does, so it pulls with constant, scale-independent magnitude in a fixed
+direction --- efficiently served, given a covariance dominated by a single market factor, by
+concentrating in a low-variance combination of a few names rather than spreading across many
+correlated ones. An empirical observation on this dataset with a plausible mechanism, not a
+theorem for every $\Sig$; portfolio weights at small vs.\ large $\lambda$ are compared in
+\cref{app:weights}.

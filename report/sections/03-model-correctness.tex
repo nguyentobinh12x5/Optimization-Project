@@ -2,82 +2,76 @@
 
 \subsection{The return and variance terms}
 
-By linearity of expectation the portfolio return satisfies
-$\mathbb{E}[w^\top r] = w^\top\mathbb{E}[r] \approx \muhat^\top w$, so minimizing
-$-\muhat^\top w$ is exactly maximizing estimated expected return; nothing is approximated in
-that translation except the estimate $\muhat$ itself. Likewise $w^\top\Sig w$ is the variance
-of the portfolio return under the same second-moment estimate, so $\gamma$ is the classical
+By linearity of expectation, $\mathbb{E}[w^\top r] = w^\top\mathbb{E}[r] \approx \muhat^\top w$,
+so minimizing $-\muhat^\top w$ is exactly maximizing estimated expected return; nothing is
+approximated beyond the estimate $\muhat$ itself. Likewise $w^\top\Sig w$ is the variance of the
+portfolio return under the same second-moment estimate, so $\gamma$ is the classical
 risk-aversion coefficient and \cref{eq:main} reduces exactly to Markowitz mean--variance
-optimization \citep{markowitz1952} when $\kappa = \lambda = 0$. That limiting case has a closed
-form and is exercised directly by the project's test suite as a sanity check.
+optimization \citep{markowitz1952} when $\kappa = \lambda = 0$ --- a closed-form limiting case
+exercised directly by the test suite as a sanity check.
 
 \subsection{The robust term is derived, not asserted}
 
-Calling a penalty ``robust'' is not an argument. Here the term is derived, and the derivation
-justifies its particular form. Suppose the true mean is not known exactly but lies in an
-ellipsoid centred on the estimate and shaped by the covariance,
+Calling a penalty ``robust'' is not an argument; here the term is derived. Suppose the true mean
+lies in an ellipsoid centred on the estimate and shaped by the covariance,
 \begin{equation}\label{eq:uncertainty-set}
 \mathcal{U} = \left\{\, \mu = \muhat + \Ssqrt u \;:\; \norm{u}_2 \le \kappa \,\right\}.
 \end{equation}
 A cautious investor evaluates a portfolio by its return under the least favourable member of
-$\mathcal{U}$, which is
+$\mathcal{U}$:
 \begin{equation}\label{eq:robust-derivation}
 \max_{\mu \in \mathcal{U}} \; \bigl(-\mu^\top w\bigr)
  \;=\; -\muhat^\top w + \max_{\norm{u}_2 \le \kappa} \bigl(-u^\top \Ssqrt w\bigr)
  \;=\; -\muhat^\top w + \kappa \norm{\Ssqrt w}_2 ,
 \end{equation}
-the final equality being the definition of the dual norm of the Euclidean norm, attained at
+the final equality being the dual norm of the Euclidean norm, attained at
 $u^\star = -\kappa\,\Ssqrt w / \norm{\Ssqrt w}_2$.
 
-Three consequences follow. First, the first two terms of \cref{eq:main} are not a heuristic
-penalty bolted onto a mean--variance objective: together they \emph{are} the exact worst-case
-expected return over \cref{eq:uncertainty-set}, placing the model in the standard robust
-portfolio framework \citep{goldfarb2003, boyd2004}. Second, the ellipsoid is shaped by $\Ssqrt$
-rather than being spherical, so directions in which the estimate is statistically less reliable
-are given proportionally more room to move against the portfolio --- the appropriate shape for
-sampling error in a mean, not an arbitrary one. Third, the term is \textbf{positively
-homogeneous of degree one} in $w$: a norm, not a squared norm, so scaling $w$ by $c > 0$ scales
-it by $c$ rather than $c^2$. This structural fact, forced on the model by the derivation rather
-than chosen, explains an empirical result in \cref{sec:insample} that would otherwise look
-simply wrong.
+Three consequences follow. The first two terms of \cref{eq:main} are thus not a heuristic penalty
+but the \emph{exact} worst-case expected return over \cref{eq:uncertainty-set}, placing the model
+in the standard robust portfolio framework \citep{goldfarb2003, boyd2004}. The ellipsoid is
+shaped by $\Ssqrt$ rather than spherical, so directions where the mean estimate is statistically
+less reliable get proportionally more room to move against the portfolio. And the term is
+\textbf{positively homogeneous of degree one} --- a norm, not a squared norm, so scaling $w$ by
+$c>0$ scales it by $c$ --- a structural fact forced by the derivation that explains an empirical
+result in \cref{sec:insample} that would otherwise look simply wrong.
 
 \subsection{The sparsity term does two jobs}
 
-What the investor of \cref{sec:identification} wants is a limit on the \emph{number} of
-holdings, a constraint on $\norm{w}_0$. That quantity is nonconvex and discontinuous, and
-imposing it would destroy the global optimality that makes the verification of
-\cref{sec:insample} meaningful. The term $\lambda\norm{w}_1$ is its standard convex surrogate,
-the substitution underlying the Lasso \citep{tibshirani1996} and its established use in
-portfolio construction \citep{brodie2009}.
+What the investor of \cref{sec:identification} wants is a limit on the \emph{number} of holdings,
+a constraint on $\norm{w}_0$ --- nonconvex and discontinuous, and imposing it would destroy the
+global optimality that makes the verification of \cref{sec:insample} meaningful. The term
+$\lambda\norm{w}_1$ is its standard convex surrogate, the substitution underlying the Lasso
+\citep{tibshirani1996} and its established use in portfolio construction \citep{brodie2009}.
 
 A second effect is specific to this problem. Under the budget constraint,
 \begin{equation}\label{eq:leverage}
 \norm{w}_1 \;\ge\; \bigl|\one^\top w\bigr| \;=\; 1 ,
 \end{equation}
-with equality precisely when every $w_i \ge 0$. So $\norm{w}_1$ measures \textbf{gross
-leverage} --- total long plus total short exposure --- and its excess over $1$ is exactly twice
-the short exposure. Because \cref{eq:main} permits short selling, this role is economically
-meaningful rather than incidental: the term that encourages few holdings also discourages
-financing large long positions with large short ones. The model obtains leverage control for
-free from a term introduced for a different purpose.
+with equality precisely when every $w_i \ge 0$, so $\norm{w}_1$ measures \textbf{gross
+leverage} --- long plus short exposure --- its excess over $1$ being exactly twice the short
+exposure. Because \cref{eq:main} permits short selling, this role is economically meaningful: the
+term that encourages few holdings also discourages financing large longs with large shorts, a
+leverage control obtained for free from a term introduced for a different purpose.
 
-\subsection{Convexity, and why it licenses a direct solve}
+\subsection{Convexity, and what it does and does not guarantee}
 
-Each term of \cref{eq:main} is convex: $-\muhat^\top w$ is affine; $\norm{\Ssqrt w}_2$ is a
-norm composed with a linear map; $w^\top\Sig w$ is a quadratic form with $\Sig \succeq 0$; and
-$\norm{w}_1$ is a norm. A nonnegative combination of convex functions is convex, and
-$\{w : \one^\top w = 1\}$ is affine and hence convex. Problem \cref{eq:main} is therefore
-convex, so \textbf{every local minimum is global} and the optimal value is unique.
+Each term of \cref{eq:main} is convex: $-\muhat^\top w$ affine, $\norm{\Ssqrt w}_2$ a norm
+composed with a linear map, $w^\top\Sig w$ a quadratic form with $\Sig \succeq 0$, and
+$\norm{w}_1$ a norm. A nonnegative combination of convex functions is convex, and
+$\{w : \one^\top w = 1\}$ is affine, so \cref{eq:main} is convex: \textbf{every local minimum is
+global} and the optimal value is unique.
 
-This is not decorative. It is what licenses handing \cref{eq:main} directly to a general-purpose
-interior-point solver (\cref{sec:insample}) rather than deriving a problem-specific algorithm:
-because the problem is convex, and \cref{eq:socp} shows it is second-order-cone representable, a
-solver such as CLARABEL is guaranteed to return the \emph{global} optimum, not merely a point
-where some local-search procedure happened to stop. No independent check of the answer is
-required for that guarantee to hold --- convexity is the guarantee, not a hint that one is
-needed.
+This is not decorative: a proximal-subgradient iteration (\cref{sec:algorithm}) is a local
+procedure, and convexity is what promotes whatever it converges to into the \emph{global}
+optimum --- the same property that lets an independent interior-point solve serve as a check on
+it (\cref{sec:verification}), since two correct solvers on a convex problem must agree. What
+convexity does \textbf{not} guarantee is that a given \emph{implementation} is bug-free: a
+mis-derived subgradient or a prematurely terminated root-find still returns a feasible point
+satisfying $\one^\top w = 1$, silently. That is why \cref{sec:verification} checks the code, not
+just the math.
 
-Finally, what the model does not capture: no true cardinality constraint, only its relaxation;
-no sector, position, or liquidity limits; no market-impact model; and no mechanism for $\muhat$
-and $\Sig$ to be anything but backward-looking sample statistics. These are revisited in
+Finally, what the model does not capture: no true cardinality constraint, only its relaxation; no
+sector, position, or liquidity limits; no market-impact model; and no mechanism for $\muhat$ and
+$\Sig$ to be anything but backward-looking sample statistics. These are revisited in
 \cref{sec:conclusion}.

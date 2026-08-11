@@ -1,24 +1,26 @@
 """
 src/backtest.py
 =================
-Walk-forward backtest out-of-sample cho project sparse+robust portfolio
-optimization (VN100). Xem thiết kế đầy đủ ở
+Out-of-sample walk-forward backtest for the sparse+robust portfolio
+optimization project (VN100). See the full design in
 docs/superpowers/specs/2026-07-26-walk-forward-backtest-design.md.
 
-SOLVER DÙNG TRONG MODULE NÀY: CVXPY (`src.cvxpy_check.cvxpy_solve` /
-`cvxpy_solve_long_only`), KHÔNG PHẢI solver proximal-subgradient tự viết
-(`src.prox_solver.solve` / `solve_long_only`) -- quyết định có chủ đích
-(trao đổi với user 2026-08-10): các hàm walk-forward ở đây gọi grid search
-hàng chục tổ hợp tham số MỖI kỳ rebalance x hàng chục kỳ, nên tốc độ per-
-solve quan trọng hơn việc "tự viết" (vốn chỉ là yêu cầu cho phần core report
-§1-6, KHÔNG áp dụng cho phần backtest so sánh A-F này). CVXPY (CLARABEL) đo
-được nhanh hơn ~4x so với solver tay trên cùng bài toán 98 mã (0.03s vs
-0.14s/lần giải) -- với lưới 60 tổ hợp x 25 kỳ x 2 lần giải/kỳ (validation +
-refit) của `walk_forward_backtest_long_short_full`, chênh lệch này là
-~13 phút (solver tay) so với ~3 phút (CVXPY). `src/prox_solver.py` VẪN LÀ
-solver chính thức của core report (§1-6, in-sample, joint-prox, cross-verify
-CVXPY) -- module này không thay thế nó, chỉ dùng CVXPY cho riêng phần
-backtest walk-forward.
+SOLVER USED IN THIS MODULE: CVXPY (`src.cvxpy_check.cvxpy_solve` /
+`cvxpy_solve_long_only`), NOT the hand-written proximal-subgradient solver
+(`src.prox_solver.solve` / `solve_long_only`) -- a deliberate decision
+(discussed with the user on 2026-08-10): the walk-forward functions here
+call grid search over dozens of parameter combinations PER rebalance
+period x dozens of periods, so per-solve speed matters more than "hand-
+written" (which was only required for the core report §1-6, NOT applicable
+to this A-F comparison backtest section). CVXPY (CLARABEL) measured ~4x
+faster than the hand-written solver on the same 98-asset problem (0.03s vs
+0.14s/solve) -- with the grid of 60 combos x 25 periods x 2 solves/period
+(validation + refit) of `walk_forward_backtest_long_short_full`, this gap
+amounts to ~13 minutes (hand-written solver) vs ~3 minutes (CVXPY).
+`src/prox_solver.py` REMAINS the official solver for the core report
+(§1-6, in-sample, joint-prox, cross-verified against CVXPY) -- this module
+does not replace it, it just uses CVXPY for the walk-forward backtest
+section specifically.
 """
 
 from __future__ import annotations
@@ -31,35 +33,40 @@ import pandas as pd
 
 ANNUALIZATION_FACTOR = 252
 
-# Ngưỡng coi std ngày là "bằng 0" (return hằng số). pandas.Series.std trên
-# chuỗi hằng số không luôn cho đúng 0.0 tuyệt đối (sai số làm tròn floating
-# point cỡ 1e-19 trong thuật toán tổng bình phương độ lệch) -> so sánh
-# `> 0` thuần không đủ an toàn, cần ngưỡng epsilon.
+# Threshold for treating the daily std as "zero" (constant return).
+# pandas.Series.std on a constant series does not always yield exactly
+# 0.0 (floating-point rounding error on the order of 1e-19 in the sum-of-
+# squared-deviations algorithm) -> a plain `> 0` comparison is not safe
+# enough, an epsilon threshold is needed.
 STD_ZERO_EPS = 1e-12
 
 
 def performance_metrics(daily_returns: pd.Series, rf: float = 0.0) -> dict:
-    """Tính các chỉ số hiệu suất chuẩn từ chuỗi return NGÀY của 1 danh mục.
+    """Compute standard performance metrics from the DAILY return series of
+    1 portfolio.
 
-    rf: lãi suất phi rủi ro NĂM (annualized), mặc định 0 theo thiết kế đã
-    chốt. Sharpe = (mean(excess_daily)) / std(daily) * sqrt(252); nếu
-    std(daily) xấp xỉ 0 (dưới ngưỡng STD_ZERO_EPS; return hằng số, vd
-    chuỗi giả lập trong test), Sharpe KHÔNG xác định -> trả NaN thay vì
-    chia cho một số cực nhỏ (pandas.Series.std trên chuỗi hằng số có thể
-    ra ~1e-19 do sai số làm tròn, không đúng 0.0 tuyệt đối).
+    rf: ANNUAL (annualized) risk-free rate, defaults to 0 per the finalized
+    design. Sharpe = (mean(excess_daily)) / std(daily) * sqrt(252); if
+    std(daily) is approximately 0 (below the STD_ZERO_EPS threshold;
+    constant return, e.g. a synthetic series in a test), Sharpe is
+    UNDEFINED -> return NaN instead of dividing by a near-zero number
+    (pandas.Series.std on a constant series can come out to ~1e-19 due to
+    rounding error, not exactly 0.0).
 
-    max_drawdown: mức sụt giảm lớn nhất từ đỉnh giá trị danh mục tích luỹ
-    (giá trị ÂM hoặc 0, không phải giá trị dương).
+    max_drawdown: the largest decline from the peak of the cumulative
+    portfolio value (a NEGATIVE value or 0, not a positive value).
 
-    CẢNH BÁO "VỠ NỢ" trong annualized_return: nếu `cumulative_return <= -1`
-    (mất sạch vốn hoặc hơn -- có thể xảy ra với danh mục long-short đòn bẩy
-    cao, vd CVXPY tìm nghiệm tối ưu chính xác với gross exposure rất lớn
-    trên 1 cửa sổ validation ngắn), công thức CAGR chuẩn
-    `(1+cumulative_return)**(1/n_years)` nhận cơ số <= 0 với số mũ phân số
-    -> ra SỐ PHỨC trong Python, không phải lỗi làm tròn mà lỗi toán học thật
-    (căn bậc lẻ/phân số của số âm không xác định trên trục thực). Xử lý:
-    chặn annualized_return ở đúng -1.0 (-100%, cùng quy ước "vỡ nợ" với
-    `_simulate_period`) thay vì để `float()` ném TypeError khi ép số phức.
+    "WIPE-OUT" WARNING in annualized_return: if `cumulative_return <= -1`
+    (total loss of capital or worse -- possible for a highly-leveraged
+    long-short portfolio, e.g. CVXPY finding an exact optimum with very
+    large gross exposure over a short validation window), the standard CAGR
+    formula `(1+cumulative_return)**(1/n_years)` receives a base <= 0 with
+    a fractional exponent -> yields a COMPLEX NUMBER in Python, which is
+    not a rounding bug but a genuine mathematical issue (an odd/fractional
+    root of a negative number is undefined on the real axis). Handling:
+    clamp annualized_return at exactly -1.0 (-100%, the same "wipe-out"
+    convention as `_simulate_period`) instead of letting `float()` raise a
+    TypeError when casting a complex number.
     """
     daily_returns = daily_returns.dropna()
     n = len(daily_returns)
@@ -101,19 +108,21 @@ def performance_metrics(daily_returns: pd.Series, rf: float = 0.0) -> dict:
 def _build_rebalance_windows(
     index: pd.DatetimeIndex, lookback_months: int, validation_months: int,
 ) -> list[dict]:
-    """Với mỗi tháng lịch (period 'M') đủ `lookback_months` tháng dữ liệu
-    phía trước, trả về 1 dict mô tả kỳ rebalance:
-      - rebalance_date: ngày giao dịch ĐẦU TIÊN của tháng target (Timestamp)
-      - e_mask, v_mask, target_mask: boolean array cùng độ dài `index`
+    """For each calendar month (period 'M') that has at least `lookback_months`
+    months of data preceding it, return 1 dict describing a rebalance period:
+      - rebalance_date: the FIRST trading day of the target month (Timestamp)
+      - e_mask, v_mask, target_mask: boolean arrays with the same length as
+        `index`
 
-    E (estimation) = (lookback_months - validation_months) tháng đầu của cửa
-    sổ lookback_months tháng ngay trước tháng target. Vwin (validation) =
-    validation_months tháng cuối của cửa sổ đó. Cả E và Vwin đều nằm HOÀN
-    TOÀN trước rebalance_date -- đây là bất biến chống look-ahead, có test
-    riêng khẳng định (`test_build_windows_no_look_ahead`): mọi tháng trong
-    window (E union Vwin) đứng TRƯỚC target_month trong danh sách tháng lịch
-    sắp xếp, nên mọi ngày giao dịch của E/Vwin nghiêm ngặt < rebalance_date
-    (ngày đầu tiên của target_month).
+    E (estimation) = the first (lookback_months - validation_months) months
+    of the lookback_months-month window immediately preceding the target
+    month. Vwin (validation) = the last validation_months months of that
+    window. Both E and Vwin lie ENTIRELY before rebalance_date -- this is
+    the anti-look-ahead invariant, confirmed by a dedicated test
+    (`test_build_windows_no_look_ahead`): every month in the window (E
+    union Vwin) precedes target_month in the sorted list of calendar
+    months, so every trading day of E/Vwin is strictly < rebalance_date
+    (the first day of target_month).
     """
     periods = index.to_period("M")
     months = sorted(periods.unique())
@@ -146,54 +155,64 @@ def _simulate_period(
     prev_weights_drifted: np.ndarray | None,
     fee: float,
 ) -> tuple[pd.Series, float, float, np.ndarray, bool]:
-    """Mô phỏng 1 kỳ nắm giữ (thường 1 tháng) với trọng số CỐ ĐỊNH lúc đầu kỳ
-    `w_start`, để trọng số TRÔI theo giá từng ngày (mua-và-giữ, không giao
-    dịch giữa kỳ). Turnover tính so với trọng số ĐÃ TRÔI cuối kỳ TRƯỚC
-    (`prev_weights_drifted`), vì đó là trạng thái danh mục THỰC TẾ ngay
-    trước khi rebalance -- không phải trọng số MỤC TIÊU của kỳ trước.
+    """Simulate 1 holding period (usually 1 month) with weights FIXED at the
+    start of the period `w_start`, letting the weights DRIFT with price
+    day by day (buy-and-hold, no trading within the period). Turnover is
+    computed relative to the DRIFTED weights at the end of the PREVIOUS
+    period (`prev_weights_drifted`), since that is the ACTUAL portfolio
+    state right before the rebalance -- not the previous period's TARGET
+    weights.
 
-    Trả về (daily_net_returns, turnover, cost, w_end_drifted). Phí `cost`
-    bị trừ vào return của NGÀY ĐẦU TIÊN trong kỳ (ngày rebalance). Dùng
-    chung cho walk-forward VÀ baseline equal-weight (Task 5).
+    Returns (daily_net_returns, turnover, cost, w_end_drifted). The fee
+    `cost` is deducted from the FIRST DAY's return of the period (the
+    rebalance day). Shared by walk-forward AND the equal-weight baseline
+    (Task 5).
 
-    CẢNH BÁO "VỠ NỢ" (bug fix): công thức trôi "w = w*(1+r); w = w/w.sum()"
-    giả định giá trị danh mục sau mỗi ngày LUÔN DƯƠNG (đúng cho long-only,
-    vì mọi w_i>=0 và return từng mã > -100% -> tổng luôn >0). Với danh mục
-    long-short đòn bẩy cao (`walk_forward_backtest_long_short(_full)`,
-    gross exposure = sum(|w|) có thể vượt xa 1, không có trần), 1 ngày xấu
-    có thể khiến port_ret <= -100% -- nếu KHÔNG xử lý riêng, w.sum() sau khi
-    nhân sẽ <=0, chia cho số đó sẽ LẬT DẤU toàn bộ trọng số một cách vô
-    nghĩa (đã tái tạo bằng số cụ thể, xem thảo luận với user 2026-08-10).
-    Xử lý: khi phát hiện port_ret <= -100% trong 1 ngày, coi đó là "vỡ nợ"
-    (mất toàn bộ vốn) -- CHẶN return ngày đó ở đúng -100% (không cho âm hơn,
-    quy ước chuẩn cho equity curve compound để (1+r).cumprod() không xuống
-    dưới 0), đặt w về toàn 0 (không còn vị thế), các ngày CÒN LẠI trong kỳ
-    trả return=0% (coi như "tiền mặt" tới kỳ rebalance sau). Phát cảnh báo
-    rõ ràng (`warnings.warn`) thay vì âm thầm tiếp tục -- caller có thể bắt
-    qua cột `wiped_out` trả về để biết kỳ nào bị ảnh hưởng.
+    "WIPE-OUT" WARNING (bug fix): the drift formula "w = w*(1+r); w =
+    w/w.sum()" assumes the portfolio value after each day is ALWAYS
+    POSITIVE (true for long-only, since every w_i>=0 and each asset's
+    return > -100% -> the sum is always >0). For a highly-leveraged
+    long-short portfolio (`walk_forward_backtest_long_short(_full)`,
+    gross exposure = sum(|w|) can far exceed 1, with no cap), 1 bad day
+    can drive port_ret <= -100% -- if NOT handled specially, w.sum() after
+    multiplying would be <=0, and dividing by that would FLIP THE SIGN of
+    every weight in a meaningless way (reproduced with concrete numbers,
+    see the discussion with the user on 2026-08-10). Handling: when a day
+    with port_ret <= -100% is detected, treat it as a "wipe-out" (total
+    loss of capital) -- CLAMP that day's return at exactly -100% (never
+    more negative, the standard convention for a compounding equity curve
+    so that (1+r).cumprod() never goes below 0), set w to all zeros (no
+    remaining position), and the REMAINING days of the period return 0%
+    (treated as "cash" until the next rebalance). Issue a clear warning
+    (`warnings.warn`) instead of silently continuing -- the caller can
+    check the returned `wiped_out` column to know which periods were
+    affected.
 
     Parameters
     ----------
     w_start : np.ndarray, shape (N,)
-        Trọng số MỤC TIÊU ngay sau khi rebalance đầu kỳ.
+        TARGET weights right after the start-of-period rebalance.
     period_returns : pd.DataFrame, shape (T_period, N)
-        Simple daily returns của kỳ nắm giữ, cùng thứ tự cột với w_start.
+        Simple daily returns for the holding period, same column order as
+        w_start.
     prev_weights_drifted : np.ndarray | None, shape (N,)
-        Trọng số ĐÃ TRÔI cuối kỳ trước; None nếu đây là kỳ đầu tiên (turnover
-        toàn phần, tương đương coi danh mục trước đó toàn 0).
+        DRIFTED weights at the end of the previous period; None if this is
+        the first period (full turnover, equivalent to treating the
+        previous portfolio as all zeros).
     fee : float
-        Phí giao dịch tỉ lệ (vd 0.002 = 0.20%) nhân với turnover.
+        Proportional transaction fee (e.g. 0.002 = 0.20%) multiplied by
+        turnover.
 
     Returns
     -------
     (daily_net, turnover, cost, w_end, wiped_out) : tuple
-        daily_net : pd.Series, cùng index với period_returns. Nếu vỡ nợ,
-            ngày vỡ nợ = -1.0 CHÍNH XÁC, các ngày sau đó (nếu còn) = 0.0.
+        daily_net : pd.Series, same index as period_returns. If wiped out,
+            the wipe-out day = EXACTLY -1.0, and any subsequent days = 0.0.
         turnover : float, = sum(|w_start - prev_weights_drifted|).
         cost : float, = fee * turnover.
-        w_end : np.ndarray, shape (N,), trọng số đã trôi cuối kỳ (sum=1,
-            hoặc toàn 0 nếu vỡ nợ trong kỳ).
-        wiped_out : bool, True nếu kỳ này có ít nhất 1 ngày vỡ nợ.
+        w_end : np.ndarray, shape (N,), drifted weights at end of period
+            (sum=1, or all zeros if wiped out during the period).
+        wiped_out : bool, True if this period had at least 1 wipe-out day.
     """
     prev = np.zeros_like(w_start) if prev_weights_drifted is None else prev_weights_drifted
     turnover = float(np.abs(w_start - prev).sum())
@@ -210,10 +229,11 @@ def _simulate_period(
         port_ret = float(w @ day_ret.values)
         if port_ret <= -1.0:
             warnings.warn(
-                f"_simulate_period: danh mục 'vỡ nợ' (port_ret={port_ret:.4f} <= -100%, "
-                f"gross exposure ban đầu={np.abs(w_start).sum():.3f}) -- return ngày này "
-                "bị chặn ở -100%, các ngày còn lại trong kỳ coi như return=0 (không thể "
-                "'hồi phục' từ vỡ nợ). Xem docstring _simulate_period mục 'CẢNH BÁO VỠ NỢ'.",
+                f"_simulate_period: portfolio 'wiped out' (port_ret={port_ret:.4f} <= -100%, "
+                f"initial gross exposure={np.abs(w_start).sum():.3f}) -- this day's return "
+                "is clamped at -100%, remaining days in the period are treated as return=0 "
+                "(cannot 'recover' from a wipe-out). See the _simulate_period docstring section "
+                "'WIPE-OUT WARNING'.",
                 RuntimeWarning,
                 stacklevel=2,
             )
@@ -234,19 +254,20 @@ def _simulate_period(
 
 @dataclass
 class BacktestResult:
-    """Kết quả trả về bởi `walk_forward_backtest`.
+    """Result returned by `walk_forward_backtest`.
 
     daily_returns : pd.Series
-        Return NGÀY net-of-fee của toàn bộ giai đoạn out-of-sample, nối các
-        kỳ rebalance liên tiếp lại, sắp xếp theo thời gian.
+        Net-of-fee DAILY returns for the entire out-of-sample period,
+        concatenating consecutive rebalance periods, sorted by time.
     rebalance_log : pd.DataFrame
-        1 dòng / kỳ rebalance, index = rebalance_date, cột: kappa, gamma,
-        turnover, cost, n_active, val_sharpe (Sharpe trên Vwin ứng với tham
-        số được chọn).
+        1 row / rebalance period, index = rebalance_date, columns: kappa,
+        gamma, turnover, cost, n_active, val_sharpe (Sharpe on Vwin for the
+        selected parameters).
     weights : pd.DataFrame
-        1 dòng / kỳ rebalance, index = rebalance_date, cột = tên tài sản
-        (khớp `returns.columns`), giá trị = trọng số MỤC TIÊU triển khai
-        ngay sau rebalance (trước khi trôi theo giá trong kỳ).
+        1 row / rebalance period, index = rebalance_date, columns = asset
+        names (matching `returns.columns`), values = TARGET weights
+        deployed right after the rebalance (before drifting with price
+        during the period).
     """
 
     daily_returns: pd.Series
@@ -279,85 +300,97 @@ def walk_forward_backtest(
     selection_metric: str = "sharpe",
     max_weight: float | None = None,
 ) -> BacktestResult:
-    """Walk-forward backtest out-of-sample, long-only, tự chọn (kappa,gamma)
-    mỗi kỳ qua validation trên Vwin -- tiêu chí chọn là `selection_metric`
-    ("sharpe": Sharpe ratio, MẶC ĐỊNH -- đồng bộ với
-    `walk_forward_backtest_long_short(_full)` vốn luôn chọn theo Sharpe;
-    "return": cumulative return thô, giữ lại làm tuỳ chọn lịch sử). Xem
-    thiết kế đầy đủ trong
+    """Out-of-sample, long-only walk-forward backtest, automatically
+    selecting (kappa,gamma) each period via validation on Vwin -- the
+    selection criterion is `selection_metric` ("sharpe": Sharpe ratio,
+    DEFAULT -- consistent with `walk_forward_backtest_long_short(_full)`
+    which always selects by Sharpe; "return": raw cumulative return,
+    kept as a legacy option). See the full design in
     docs/superpowers/specs/2026-07-26-walk-forward-backtest-design.md.
 
-    LƯU Ý PHƯƠNG PHÁP LUẬN (đổi lại mặc định về "sharpe" theo yêu cầu của
-    user -- để CẢ 6 phương pháp so sánh trong report dùng CHUNG một tiêu chí
-    chọn tham số, không lệch nhau giữa nhánh long-only và long-short):
-    bản trước có một giai đoạn đổi mặc định sang "return" thô (không điều
-    chỉnh rủi ro) -- dễ chọn trúng cấu hình "may mắn" ngắn hạn trên
-    validation 6 tháng hơn Sharpe (vốn cân bằng return với biến động), như
-    minh hoạ trong `test_walk_forward_backtest_selects_max_return_when_requested`.
-    Tuỳ chọn "return" vẫn giữ nguyên qua `selection_metric="return"` cho ai
-    cần tái lập kết quả cũ, nhưng KHÔNG còn là mặc định.
+    METHODOLOGICAL NOTE (default changed back to "sharpe" at the user's
+    request -- so that ALL 6 methods compared in the report use the SAME
+    parameter-selection criterion, without a mismatch between the
+    long-only and long-short branches): an earlier version had a phase
+    where the default was changed to raw "return" (not risk-adjusted) --
+    this is more prone to picking a short-term "lucky" configuration on
+    the 6-month validation window than Sharpe (which balances return
+    against volatility), as illustrated in
+    `test_walk_forward_backtest_selects_max_return_when_requested`. The
+    "return" option is still available via `selection_metric="return"`
+    for anyone needing to reproduce the old results, but it is NO LONGER
+    the default.
 
-    SOLVER: `cvxpy_solve_long_only` (CVXPY/CLARABEL) -- xem LƯU Ý ở đầu
-    module, KHÔNG PHẢI `src.prox_solver.solve_long_only` (solver tay chỉ
-    dùng cho core report §1-6).
+    SOLVER: `cvxpy_solve_long_only` (CVXPY/CLARABEL) -- see the NOTE at
+    the top of the module, NOT `src.prox_solver.solve_long_only` (the
+    hand-written solver, used only for the core report §1-6).
 
-    Với mỗi kỳ rebalance hàng tháng (xem `_build_rebalance_windows`):
-    1. Ước lượng (mu_hat, Sigma, Sigma_sqrt) trên cửa sổ E (estimation).
-    2. Với MỖI (kappa, gamma) trong param_grid: giải `cvxpy_solve_long_only`
-       trên E, đánh giá `selection_metric` của danh mục thu được trên Vwin
-       (validation) -- KHÔNG dùng lại tham số đã fit trên Vwin để giải lại,
-       chỉ dùng Vwin để CHỌN tham số tốt nhất.
-    3. Chọn (kappa*, gamma*) có `selection_metric` validation cao nhất.
-    4. Ước lượng lại (mu, Sigma, Sigma_sqrt) trên TOÀN BỘ E union Vwin (dùng
-       hết dữ liệu trước rebalance_date để có ước lượng tốt nhất), giải lại
-       `cvxpy_solve_long_only` với (kappa*, gamma*) -- đây là trọng số THẬT
-       SỰ triển khai cho tháng target.
-    5. Mô phỏng return của tháng target bằng `_simulate_period`, dùng trọng
-       số đã trôi cuối kỳ TRƯỚC làm baseline turnover (không phải trọng số
-       mục tiêu của kỳ trước).
+    For each monthly rebalance period (see `_build_rebalance_windows`):
+    1. Estimate (mu_hat, Sigma, Sigma_sqrt) on window E (estimation).
+    2. For EACH (kappa, gamma) in param_grid: solve `cvxpy_solve_long_only`
+       on E, evaluate the `selection_metric` of the resulting portfolio on
+       Vwin (validation) -- do NOT reuse parameters fit on Vwin to solve
+       again, Vwin is used ONLY to SELECT the best parameters.
+    3. Select the (kappa*, gamma*) with the highest validation
+       `selection_metric`.
+    4. Re-estimate (mu, Sigma, Sigma_sqrt) on the FULL E union Vwin
+       (using all data before rebalance_date for the best estimate),
+       re-solve `cvxpy_solve_long_only` with (kappa*, gamma*) -- these
+       are the weights ACTUALLY deployed for the target month.
+    5. Simulate the target month's return with `_simulate_period`, using
+       the previous period's drifted end-of-period weights as the
+       turnover baseline (not the previous period's target weights).
 
-    KHÔNG LOOK-AHEAD: với mỗi kỳ, estimation (E) và validation (Vwin) chỉ
-    dùng dữ liệu có ngày < ngày rebalance (đảm bảo bởi _build_rebalance_windows,
-    có test cấu trúc riêng `test_build_windows_no_look_ahead`). Trọng số triển
-    khai ước lượng trên E union Vwin, KHÔNG dùng dữ liệu của tháng target.
+    NO LOOK-AHEAD: for each period, estimation (E) and validation (Vwin)
+    only use data with dates < the rebalance date (guaranteed by
+    _build_rebalance_windows, with its own dedicated structural test
+    `test_build_windows_no_look_ahead`). The deployed weights are
+    estimated on E union Vwin, WITHOUT using data from the target month.
 
     Parameters
     ----------
     returns : pd.DataFrame, shape (T, N)
-        Simple daily returns, index = date (tăng dần), columns = symbol.
+        Simple daily returns, index = date (ascending), columns = symbol.
     lookback_months : int, default 24
-        Tổng số tháng lịch sử dùng cho mỗi kỳ (E + Vwin).
+        Total number of months of history used per period (E + Vwin).
     validation_months : int, default 6
-        Số tháng cuối của cửa sổ lookback dùng làm Vwin (phần đầu còn lại là E).
+        Number of months at the end of the lookback window used as Vwin
+        (the remaining leading portion is E).
     param_grid : list[tuple[float, float]] | None, default None
-        Danh sách (kappa, gamma) cần thử mỗi kỳ; None -> DEFAULT_PARAM_GRID
-        (kappa in {0,0.5,1,2} x gamma in {1,5,10} = 12 tổ hợp).
+        List of (kappa, gamma) to try each period; None -> DEFAULT_PARAM_GRID
+        (kappa in {0,0.5,1,2} x gamma in {1,5,10} = 12 combinations).
     shrinkage : str | None, default "lw"
-        Truyền thẳng vào `estimate_all` (Ledoit-Wolf bật xuyên suốt theo
-        thiết kế đã chốt).
+        Passed straight through to `estimate_all` (Ledoit-Wolf enabled
+        throughout per the finalized design).
     fee : float, default 0.002
-        Phí giao dịch tỉ lệ trên turnover mỗi kỳ (xem `_simulate_period`).
+        Proportional transaction fee on turnover each period (see
+        `_simulate_period`).
     rf : float, default 0.0
-        Lãi suất phi rủi ro NĂM -- dùng để tính Sharpe LOG (`val_sharpe`)
-        luôn luôn, và còn dùng để CHỌN tham số nếu `selection_metric="sharpe"`.
+        ANNUAL risk-free rate -- used to always compute the LOGGED Sharpe
+        (`val_sharpe`), and also used to SELECT parameters if
+        `selection_metric="sharpe"`.
     selection_metric : {"sharpe", "return"}, default "sharpe"
-        Tiêu chí chọn (kappa,gamma) trên Vwin mỗi kỳ. "sharpe" (MẶC ĐỊNH) =
-        Sharpe ratio (rf=`rf`) -- đồng bộ với nhánh long-short
-        (`walk_forward_backtest_long_short(_full)`), vốn luôn chọn theo
-        Sharpe, để so sánh công bằng giữa mọi phương pháp trong report.
-        "return" = cumulative return thô, giữ lại làm tuỳ chọn lịch sử (xem
-        LƯU Ý PHƯƠNG PHÁP LUẬN ở trên). `rebalance_log` luôn có cả 2 cột
-        `val_return` và `val_sharpe` bất kể chọn tiêu chí nào (cột kia chỉ
-        mang tính LOG).
+        Criterion for selecting (kappa,gamma) on Vwin each period. "sharpe"
+        (DEFAULT) = Sharpe ratio (rf=`rf`) -- consistent with the
+        long-short branch (`walk_forward_backtest_long_short(_full)`),
+        which always selects by Sharpe, for a fair comparison across all
+        methods in the report. "return" = raw cumulative return, kept as
+        a legacy option (see the METHODOLOGICAL NOTE above).
+        `rebalance_log` always has both the `val_return` and `val_sharpe`
+        columns regardless of which criterion is selected (the other
+        column is purely for LOGGING).
     max_weight : float | None, default None
-        Trần trọng số MỖI mã, truyền thẳng vào `cvxpy_solve_long_only` (xem
-        docstring hàm đó) -- None = không ràng buộc (hành vi gốc). Đây là
-        ràng buộc LỒI thật, không phải heuristic: max_weight=0.20 đảm bảo
-        TOÁN HỌC luôn có >= 5 mã active (vì mỗi mã đóng góp tối đa 20% vào
-        tổng=1), áp dụng cho CẢ bước chọn tham số (Vwin) lẫn bước deploy,
-        để validation phản ánh đúng hiệu suất của chính danh mục sẽ triển
-        khai (không chọn tham số dựa trên 1 danh mục rồi deploy 1 danh mục
-        khác về mặt ràng buộc).
+        Per-asset weight cap, passed straight through to
+        `cvxpy_solve_long_only` (see that function's docstring) -- None =
+        unconstrained (original behavior). This is a genuine CONVEX
+        constraint, not a heuristic: max_weight=0.20 guarantees
+        MATHEMATICALLY at least 5 active assets (since each asset
+        contributes at most 20% to the total=1), applied to BOTH the
+        parameter-selection step (Vwin) and the deploy step, so that
+        validation reflects the true performance of the very portfolio
+        that will be deployed (not selecting parameters based on one
+        portfolio then deploying a different one in terms of
+        constraints).
 
     Returns
     -------
@@ -369,13 +402,13 @@ def walk_forward_backtest(
     if param_grid is None:
         param_grid = DEFAULT_PARAM_GRID
     if selection_metric not in ("return", "sharpe"):
-        raise ValueError(f'selection_metric phải là "return" hoặc "sharpe", nhận: {selection_metric!r}')
+        raise ValueError(f'selection_metric must be "return" or "sharpe", got: {selection_metric!r}')
 
     windows = _build_rebalance_windows(returns.index, lookback_months, validation_months)
     if not windows:
         raise ValueError(
-            f"Không đủ dữ liệu cho lookback_months={lookback_months} "
-            f"(có {returns.index.to_period('M').nunique()} tháng)."
+            f"Not enough data for lookback_months={lookback_months} "
+            f"(have {returns.index.to_period('M').nunique()} months)."
         )
 
     all_daily: list[pd.Series] = []
@@ -443,64 +476,74 @@ def walk_forward_backtest_long_short(
     fee: float = 0.002,
     rf: float = 0.0,
 ) -> BacktestResult:
-    """Walk-forward backtest OOS trên nhánh LONG-SHORT (`cvxpy_solve` --
-    xem LƯU Ý SOLVER ở đầu module, cho phép bán khống -- KHÔNG có ràng buộc
-    `w>=0`, chỉ `1ᵀw=1`), tự chọn (lam, gamma) mỗi kỳ qua Sharpe validation,
-    với `kappa` CỐ ĐỊNH (mặc định 0.0 -- "chỉ sparse, không robust", theo
-    yêu cầu so sánh với method A-D).
+    """OOS walk-forward backtest on the LONG-SHORT branch (`cvxpy_solve` --
+    see the SOLVER NOTE at the top of the module, allows short-selling --
+    NO `w>=0` constraint, only `1ᵀw=1`), automatically selecting (lam,
+    gamma) each period via Sharpe validation, with `kappa` FIXED (default
+    0.0 -- "sparsity only, no robustness", per the requirement to compare
+    against methods A-D).
 
-    KHÁC với `walk_forward_backtest` (nhánh long-only, chọn kappa/gamma,
-    KHÔNG có lambda vì L1 vô nghĩa dưới ràng buộc long-only -- xem docstring
-    module `prox_solver.py`): ở đây lambda MỚI thật sự có tác dụng (điều
-    khiển sparsity qua soft-threshold + joint prox trong `solve()`), còn
-    kappa cố định (không nằm trong `param_grid`) thay vì được chọn tự động.
+    DIFFERENT from `walk_forward_backtest` (the long-only branch, which
+    selects kappa/gamma, with NO lambda since L1 is meaningless under the
+    long-only constraint -- see the `prox_solver.py` module docstring):
+    here lambda ACTUALLY has an effect (controlling sparsity via
+    soft-threshold + joint prox in `solve()`), while kappa is fixed (not
+    in `param_grid`) instead of being auto-selected.
 
-    BUG ĐÃ SỬA (2026-08-10, phát hiện khi n_active=1 MỌI kỳ một cách bất
-    thường, kể cả khi lam=0 được chọn -- không có cách nào L1=0 lại tự ép
-    về 1 mã): bước deploy cuối gọi `cvxpy_solve(mu_f, sigma_f, sqrt_f,
-    kappa, *best_params)` với `best_params=(lam, gamma)`, trong khi
-    `cvxpy_solve` cần thứ tự `(kappa, gamma, lam)` -- unpack `*best_params`
-    theo thứ tự vị trí khiến gamma THẬT nhận giá trị lam (rất nhỏ, tối đa
-    0.02 trong grid) còn lam THẬT nhận giá trị gamma (1-10, lớn hơn MỌI lam
-    từng thử tới 50-500 lần) -- risk aversion gần như = 0 + phạt L1 khổng lồ
-    ép danh mục về đúng 1 mã (mã có mu cao nhất) mỗi kỳ, bất kể lam/gamma
-    log ra là gì. Vòng lặp CHỌN tham số (bên trên) không bị ảnh hưởng (dùng
-    tên biến tường minh `kappa, gamma, lam`, không unpack tuple) -- chỉ bước
-    deploy cuối bị lỗi, nên (lam,gamma) log trong `rebalance_log` là ĐÚNG
-    tham số được CHỌN, chỉ SAI ở chỗ không phải tham số THỰC SỰ được dùng để
-    giải nghiệm triển khai. Đã sửa bằng cách unpack tường minh
-    `lam_star, gamma_star = best_params` trước khi gọi. Xem
+    BUG FIXED (2026-08-10, discovered when n_active=1 EVERY period in an
+    abnormal way, even when lam=0 was selected -- there is no way L1=0
+    would force the solution down to 1 asset): the final deploy step
+    called `cvxpy_solve(mu_f, sigma_f, sqrt_f, kappa, *best_params)` with
+    `best_params=(lam, gamma)`, while `cvxpy_solve` expects the order
+    `(kappa, gamma, lam)` -- unpacking `*best_params` positionally caused
+    the REAL gamma to receive the lam value (very small, at most 0.02 in
+    the grid) and the REAL lam to receive the gamma value (1-10, 50-500x
+    larger than every lam ever tried) -- risk aversion nearly = 0 plus a
+    huge L1 penalty forced the portfolio down to exactly 1 asset (the one
+    with the highest mu) every period, regardless of what (lam,gamma) were
+    logged. The parameter-SELECTION loop (above) was unaffected (uses
+    explicit variable names `kappa, gamma, lam`, not tuple unpacking) --
+    only the final deploy step had the bug, so the (lam,gamma) logged in
+    `rebalance_log` are the CORRECT selected parameters, just WRONG in
+    that they were not the actual parameters used to solve the deployed
+    solution. Fixed by explicitly unpacking
+    `lam_star, gamma_star = best_params` before the call. See
     `test_walk_forward_backtest_long_short_deploys_with_correct_param_order`.
 
-    CẢNH BÁO MÔ HÌNH HOÁ (khác biệt quan trọng so với nhánh long-only): `_simulate_period`
-    dùng công thức "trôi theo giá rồi chuẩn hoá lại tổng=1" (`w = w*(1+r); w
-    = w/w.sum()`) -- ĐÚNG cho tỉ trọng giá trị của vị thế long, nhưng chỉ là
-    XẤP XỈ cho vị thế short (không mô hình phí vay mượn cổ phiếu/margin
-    call/lãi suất margin thật). Đây là hạn chế kế thừa từ chính công thức
-    Markowitz gốc `w ∈ R^N` không ràng buộc dấu (xem README/notebook), không
-    phải lỗi riêng của hàm này. Turnover cũng KHÔNG có trần (solve() không
-    giới hạn `‖w‖₁` ngoài phạt mềm qua lambda) -- xem cột `gross_exposure`
-    trong `rebalance_log` để theo dõi mức đòn bẩy thực tế mỗi kỳ.
+    MODELING CAVEAT (an important difference from the long-only branch):
+    `_simulate_period` uses the "drift with price then renormalize to
+    sum=1" formula (`w = w*(1+r); w = w/w.sum()`) -- CORRECT for the value
+    weighting of long positions, but only an APPROXIMATION for short
+    positions (it does not model actual stock-borrow fees/margin
+    calls/margin interest). This is a limitation inherited from the
+    original Markowitz formulation itself `w ∈ R^N` with no sign
+    constraint (see the README/notebook), not a bug specific to this
+    function. Turnover also has NO cap (solve() does not bound `‖w‖₁`
+    beyond the soft penalty via lambda) -- see the `gross_exposure` column
+    in `rebalance_log` to track the actual leverage level each period.
 
     Parameters
     ----------
     returns : pd.DataFrame, shape (T, N)
-        Simple daily returns, index = date (tăng dần), columns = symbol.
+        Simple daily returns, index = date (ascending), columns = symbol.
     kappa : float, default 0.0
-        Hệ số robust CỐ ĐỊNH xuyên suốt (không nằm trong param_grid) -- 0.0
-        nghĩa là tắt hẳn robust term, chỉ còn mean-variance + sparsity.
+        FIXED robustness coefficient throughout (not in param_grid) -- 0.0
+        means the robust term is fully disabled, leaving only
+        mean-variance + sparsity.
     lookback_months, validation_months : int, default 24, 6
-        Xem `walk_forward_backtest`.
+        See `walk_forward_backtest`.
     param_grid : list[tuple[float, float]] | None, default None
-        Danh sách (lam, gamma) cần thử mỗi kỳ; None -> `DEFAULT_PARAM_GRID_LONG_SHORT`
-        (lam in {0, 0.001, 0.005, 0.01, 0.02} x gamma in {1,5,10} = 15 tổ hợp).
-    shrinkage, fee, rf : xem `walk_forward_backtest`.
+        List of (lam, gamma) to try each period; None ->
+        `DEFAULT_PARAM_GRID_LONG_SHORT` (lam in {0, 0.001, 0.005, 0.01,
+        0.02} x gamma in {1,5,10} = 15 combinations).
+    shrinkage, fee, rf : see `walk_forward_backtest`.
 
     Returns
     -------
     BacktestResult
-        `rebalance_log` có cột `lam`/`gamma` (thay vì `kappa`/`gamma`) +
-        thêm cột `gross_exposure` (= `sum(|w|)`, >1 nếu có short) so với
+        `rebalance_log` has `lam`/`gamma` columns (instead of
+        `kappa`/`gamma`) + an extra `gross_exposure` column
+        (= `sum(|w|)`, >1 if there is any short position) compared to
         `walk_forward_backtest`.
     """
     from src.cvxpy_check import cvxpy_solve
@@ -512,8 +555,8 @@ def walk_forward_backtest_long_short(
     windows = _build_rebalance_windows(returns.index, lookback_months, validation_months)
     if not windows:
         raise ValueError(
-            f"Không đủ dữ liệu cho lookback_months={lookback_months} "
-            f"(có {returns.index.to_period('M').nunique()} tháng)."
+            f"Not enough data for lookback_months={lookback_months} "
+            f"(have {returns.index.to_period('M').nunique()} months)."
         )
 
     all_daily: list[pd.Series] = []
@@ -582,46 +625,50 @@ def walk_forward_backtest_long_short_full(
     fee: float = 0.002,
     rf: float = 0.0,
 ) -> BacktestResult:
-    """Walk-forward OOS trên nhánh LONG-SHORT với ĐẦY ĐỦ phương trình gốc
-    (`cvxpy_solve` -- xem LƯU Ý SOLVER ở đầu module, w không ràng buộc dấu
-    -- cho bán khống), tự chọn CẢ BA (kappa, lam, gamma) mỗi kỳ qua Sharpe
-    validation.
+    """OOS walk-forward on the LONG-SHORT branch with the FULL original
+    equation (`cvxpy_solve` -- see the SOLVER NOTE at the top of the
+    module, w has no sign constraint -- allows short-selling),
+    automatically selecting ALL THREE (kappa, lam, gamma) each period via
+    Sharpe validation.
 
-    KHÁC với `walk_forward_backtest_long_short`: ở đó `kappa` bị CỐ ĐỊNH
-    (không nằm trong param_grid, mặc định 0.0 -- "chỉ sparse, không robust",
-    dùng cho method E trong bảng so sánh). Ở đây `kappa` nằm TRONG param_grid
-    cùng `lam`/`gamma` -- tức là robust term VÀ sparsity term VÀ risk term
-    đều được chọn tự động mỗi kỳ, đúng công thức đầy đủ:
+    DIFFERENT from `walk_forward_backtest_long_short`: there, `kappa` is
+    FIXED (not in param_grid, default 0.0 -- "sparsity only, no
+    robustness", used for method E in the comparison table). Here `kappa`
+    IS IN param_grid alongside `lam`/`gamma` -- meaning the robust term
+    AND the sparsity term AND the risk term are all auto-selected each
+    period, matching the full equation exactly:
 
         min_w  -mu^T w + kappa*||Sigma^(1/2) w||_2 + gamma*w^T Sigma w
                + lam*||w||_1
         s.t.   1^T w = 1
 
-    Cùng cảnh báo mô hình hoá như `walk_forward_backtest_long_short` (drift
-    "trôi rồi chuẩn hoá lại tổng=1" là xấp xỉ cho vị thế short, không mô
-    hình phí vay mượn cổ phiếu/margin; turnover không có trần -- theo dõi
-    qua cột `gross_exposure`).
+    Same modeling caveats as `walk_forward_backtest_long_short` (the
+    "drift then renormalize to sum=1" is an approximation for short
+    positions, does not model stock-borrow fees/margin; turnover has no
+    cap -- track it via the `gross_exposure` column).
 
     Parameters
     ----------
     returns : pd.DataFrame, shape (T, N)
-        Simple daily returns, index = date (tăng dần), columns = symbol.
+        Simple daily returns, index = date (ascending), columns = symbol.
     lookback_months, validation_months : int, default 24, 6
-        Xem `walk_forward_backtest`.
+        See `walk_forward_backtest`.
     param_grid : list[tuple[float, float, float]] | None, default None
-        Danh sách (kappa, lam, gamma) cần thử mỗi kỳ; None ->
+        List of (kappa, lam, gamma) to try each period; None ->
         `DEFAULT_PARAM_GRID_LONG_SHORT_FULL` (kappa in {0,0.5,1,2} x
-        lam in {0,0.001,0.005,0.01,0.02} x gamma in {1,5,10} = 60 tổ hợp
-        -- lớn hơn 5x so với lưới 12 tổ hợp của nhánh long-only, cân nhắc
-        truyền param_grid nhỏ hơn nếu chạy trên toàn bộ universe 98 mã).
-    shrinkage, fee, rf : xem `walk_forward_backtest`.
+        lam in {0,0.001,0.005,0.01,0.02} x gamma in {1,5,10} = 60
+        combinations -- more than 5x larger than the 12-combination grid
+        of the long-only branch, consider passing a smaller param_grid
+        when running on the full 98-asset universe).
+    shrinkage, fee, rf : see `walk_forward_backtest`.
 
     Returns
     -------
     BacktestResult
-        `rebalance_log` có cột `kappa`/`lam`/`gamma` (cả ba, khác với
-        `walk_forward_backtest_long_short` chỉ có `lam`/`gamma`) +
-        `gross_exposure` (= `sum(|w|)`, >1 nếu có short).
+        `rebalance_log` has `kappa`/`lam`/`gamma` columns (all three,
+        unlike `walk_forward_backtest_long_short` which only has
+        `lam`/`gamma`) + `gross_exposure` (= `sum(|w|)`, >1 if there is
+        any short position).
     """
     from src.cvxpy_check import cvxpy_solve
     from src.estimators import estimate_all
@@ -632,8 +679,8 @@ def walk_forward_backtest_long_short_full(
     windows = _build_rebalance_windows(returns.index, lookback_months, validation_months)
     if not windows:
         raise ValueError(
-            f"Không đủ dữ liệu cho lookback_months={lookback_months} "
-            f"(có {returns.index.to_period('M').nunique()} tháng)."
+            f"Not enough data for lookback_months={lookback_months} "
+            f"(have {returns.index.to_period('M').nunique()} months)."
         )
 
     all_daily: list[pd.Series] = []
@@ -690,43 +737,46 @@ def index_buy_and_hold_backtest(
     oos_index: pd.DatetimeIndex,
     fee: float = 0.002,
 ) -> pd.Series:
-    """Benchmark "mua & giữ" chỉ số VN30 (method D), trên CÙNG giai đoạn OOS
-    như `walk_forward_backtest`/`equal_weight_backtest`, để so sánh công bằng
-    4 phương pháp trên đúng 1 khoảng thời gian.
+    """"Buy & hold" benchmark for the VN30 index (method D), over the SAME
+    OOS period as `walk_forward_backtest`/`equal_weight_backtest`, for a
+    fair comparison of the 4 methods over exactly the same time span.
 
-    KHÔNG rebalance (mua 1 lần ở đầu giai đoạn OOS, giữ nguyên tới cuối) --
-    không có estimation/turnover/weights vì đây là chỉ số thị trường có sẵn,
-    không phải danh mục tự xây từ universe VN100 (nên KHÔNG trả về
-    `BacktestResult` như 2 hàm kia, chỉ trả `daily_returns`). Phí giao dịch
-    (nếu > 0) chỉ trừ 1 LẦN vào ngày đầu tiên của giai đoạn OOS (mua), khác
-    với 2 method kia (trừ phí MỖI kỳ rebalance hàng tháng).
+    NO rebalancing (bought once at the start of the OOS period, held
+    unchanged to the end) -- no estimation/turnover/weights since this is
+    a ready-made market index, not a portfolio built from scratch from the
+    VN100 universe (so it does NOT return a `BacktestResult` like the
+    other 2 functions, only `daily_returns`). The transaction fee (if > 0)
+    is deducted only ONCE on the first day of the OOS period (the
+    purchase), unlike the other 2 methods (which deduct fees EVERY monthly
+    rebalance period).
 
     Parameters
     ----------
     index_returns : pd.Series
-        Simple daily return của chỉ số VN30 (cột "ret" trả về bởi
-        `src.data_loader.load_vn30_index`), index=date.
+        Simple daily return of the VN30 index (the "ret" column returned
+        by `src.data_loader.load_vn30_index`), index=date.
     oos_index : pd.DatetimeIndex
-        Danh sách ngày OOS cần so sánh -- thường lấy từ
-        `walk_forward_backtest(...).daily_returns.index` để đảm bảo đúng
-        cùng giai đoạn với 3 method kia.
+        The list of OOS dates to compare against -- usually taken from
+        `walk_forward_backtest(...).daily_returns.index` to ensure it
+        matches exactly the same period as the other 3 methods.
     fee : float, default 0.002
-        Phí giao dịch tỉ lệ, trừ 1 lần vào return ngày đầu tiên.
+        Proportional transaction fee, deducted once on the first day's
+        return.
 
     Returns
     -------
     pd.Series
         Daily net return, index = intersection(oos_index, index_returns.index).
-        Cảnh báo (warnings.warn) nếu có ngày OOS thiếu dữ liệu VN30 tương ứng
-        -- lịch giao dịch chỉ số và cổ phiếu lẻ hiếm khi lệch nhau nhưng
-        không đảm bảo tuyệt đối trùng khớp.
+        Warns (warnings.warn) if any OOS day is missing corresponding VN30
+        data -- the index and individual-stock trading calendars rarely
+        diverge but an exact match is not absolutely guaranteed.
     """
     common = oos_index.intersection(index_returns.index)
     missing = oos_index.difference(index_returns.index)
     if len(missing) > 0:
         warnings.warn(
-            f"index_buy_and_hold_backtest: {len(missing)}/{len(oos_index)} ngày OOS "
-            f"không có dữ liệu VN30 tương ứng, bị bỏ qua: "
+            f"index_buy_and_hold_backtest: {len(missing)}/{len(oos_index)} OOS days "
+            f"have no corresponding VN30 data, skipped: "
             f"{[d.date() for d in missing[:5]]}{'...' if len(missing) > 5 else ''}",
             stacklevel=2,
         )
@@ -743,36 +793,41 @@ def vn100_buy_and_hold_backtest(
     oos_index: pd.DatetimeIndex,
     fee: float = 0.002,
 ) -> pd.Series:
-    """Benchmark "mua & giữ" chỉ số VN100 (method D, thay cho VN30 external
-    index) -- mua equal-weight CHÍNH 98 mã trong `returns` (CÙNG universe với
-    A/B/C, không phải rổ VN30 khác thành phần) một lần duy nhất ở đầu giai
-    đoạn OOS, giữ nguyên tới cuối, không rebalance.
+    """"Buy & hold" benchmark for the VN100 index (method D, replacing the
+    external VN30 index) -- buys equal-weight the very 98 assets in
+    `returns` (SAME universe as A/B/C, not a differently-composed VN30
+    basket) once at the start of the OOS period, held unchanged to the
+    end, no rebalancing.
 
-    Khác `index_buy_and_hold_backtest` (dùng giá chỉ số VN30 có sẵn từ nguồn
-    ngoài) -- hàm này tự dựng "chỉ số" bằng cách trôi theo giá 98 mã trong
-    chính universe đang nghiên cứu, nên so sánh với A/B/C/E/F công bằng hơn
-    (cùng 98 mã, chỉ khác cách phân bổ trọng số/tần suất rebalance), thay vì
-    so với 1 rổ 30 mã vốn hoá lớn khác hẳn thành phần.
+    Unlike `index_buy_and_hold_backtest` (which uses ready-made VN30 index
+    prices from an external source) -- this function builds its own
+    "index" by drifting with the prices of the very 98 assets in the
+    universe under study, making it a fairer comparison against
+    A/B/C/E/F (same 98 assets, differing only in weight allocation /
+    rebalance frequency), rather than comparing against a 30-asset
+    large-cap basket with an entirely different composition.
 
     Parameters
     ----------
     returns : pd.DataFrame, shape (T, N)
-        Simple daily returns, index = date (tăng dần), columns = symbol --
-        CÙNG DataFrame truyền cho `walk_forward_backtest`/`equal_weight_backtest`.
+        Simple daily returns, index = date (ascending), columns = symbol --
+        the SAME DataFrame passed to
+        `walk_forward_backtest`/`equal_weight_backtest`.
     oos_index : pd.DatetimeIndex
-        Danh sách ngày OOS cần so sánh -- lấy từ
-        `walk_forward_backtest(...).daily_returns.index` để đảm bảo đúng
-        cùng giai đoạn với các method kia.
+        The list of OOS dates to compare against -- taken from
+        `walk_forward_backtest(...).daily_returns.index` to ensure it
+        matches exactly the same period as the other methods.
     fee : float, default 0.002
-        Phí giao dịch tỉ lệ, trừ 1 LẦN vào ngày đầu tiên (mua), khác
-        `equal_weight_backtest` (trừ phí MỖI kỳ rebalance hàng tháng).
+        Proportional transaction fee, deducted ONCE on the first day
+        (the purchase), unlike `equal_weight_backtest` (which deducts
+        fees EVERY monthly rebalance period).
 
     Returns
     -------
     pd.Series
-        Daily net return, index = oos_index (nội suy trực tiếp từ
-        `returns.loc[oos_index]`, không cần intersection vì `returns` là
-        nguồn dữ liệu gốc của chính oos_index).
+        Daily net return, index = oos_index (sliced directly from
+        `returns.loc[oos_index]`, no intersection needed since `returns`
+        is the original data source for oos_index itself).
     """
     n = returns.shape[1]
     w_uniform = np.full(n, 1.0 / n)
@@ -783,8 +838,8 @@ def vn100_buy_and_hold_backtest(
     )
     if wiped_out:
         warnings.warn(
-            "vn100_buy_and_hold_backtest: danh mục 'vỡ nợ' trong giai đoạn OOS "
-            "-- xem cảnh báo chi tiết từ _simulate_period.",
+            "vn100_buy_and_hold_backtest: portfolio 'wiped out' during the OOS period "
+            "-- see the detailed warning from _simulate_period.",
             RuntimeWarning,
             stacklevel=2,
         )
@@ -798,24 +853,27 @@ def equal_weight_backtest(
     validation_months: int = 6,
     fee: float = 0.002,
 ) -> BacktestResult:
-    """Benchmark equal-weight 1/N trên CÙNG danh sách ngày rebalance như
-    `walk_forward_backtest` (dùng cùng `lookback_months`/`validation_months`
-    CHỈ để sinh windows giống hệt, đảm bảo so sánh công bằng trên cùng giai
-    đoạn OOS -- benchmark không ước lượng gì (không dùng E/Vwin), trọng số
-    mục tiêu mỗi kỳ luôn `1/N` với N = số tài sản trong `returns`.
+    """Equal-weight 1/N benchmark on the SAME list of rebalance dates as
+    `walk_forward_backtest` (uses the same `lookback_months`/
+    `validation_months` ONLY to generate identical windows, ensuring a
+    fair comparison over the same OOS period -- the benchmark estimates
+    nothing (does not use E/Vwin), the target weight each period is
+    always `1/N` with N = the number of assets in `returns`.
 
     Parameters
     ----------
     returns : pd.DataFrame, shape (T, N)
-        Simple daily returns, index = date (tăng dần), columns = symbol.
+        Simple daily returns, index = date (ascending), columns = symbol.
     lookback_months : int, default 24
-        Chỉ dùng để tạo cùng danh sách ngày rebalance với walk-forward
-        (xem `_build_rebalance_windows`); benchmark không cần E/Vwin.
+        Used only to generate the same list of rebalance dates as
+        walk-forward (see `_build_rebalance_windows`); the benchmark does
+        not need E/Vwin.
     validation_months : int, default 6
-        Tương tự -- chỉ ảnh hưởng danh sách ngày rebalance, không dùng để
-        ước lượng gì ở đây.
+        Same as above -- only affects the list of rebalance dates, not
+        used for any estimation here.
     fee : float, default 0.002
-        Phí giao dịch tỉ lệ trên turnover mỗi kỳ (xem `_simulate_period`).
+        Proportional transaction fee on turnover each period (see
+        `_simulate_period`).
 
     Returns
     -------
@@ -823,7 +881,7 @@ def equal_weight_backtest(
     """
     windows = _build_rebalance_windows(returns.index, lookback_months, validation_months)
     if not windows:
-        raise ValueError(f"Không đủ dữ liệu cho lookback_months={lookback_months}.")
+        raise ValueError(f"Not enough data for lookback_months={lookback_months}.")
 
     n = returns.shape[1]
     w_uniform = np.full(n, 1.0 / n)

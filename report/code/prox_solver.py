@@ -2,178 +2,200 @@
 src/prox_solver.py
 ====================
 
-Solver proximal-subgradient TỰ VIẾT (numpy thuần) cho bài toán sparse+robust
-portfolio optimization:
+HAND-WRITTEN (pure numpy) proximal-subgradient solver for the sparse+robust
+portfolio optimization problem:
 
     min_w  f(w) = -mu^T w + kappa * ||Sigma^(1/2) w||_2 + gamma * w^T Sigma w
                   + lam * ||w||_1
     s.t.   1^T w = 1
 
-w KHÔNG bị ràng buộc không âm (cho phép bán khống). KHÔNG dùng cvxpy,
-scipy.optimize, sklearn hay bất kỳ solver có sẵn nào -- toàn bộ thuật toán
-cài đặt bằng numpy thuần theo thiết kế đã duyệt (Gate 2).
+w has NO non-negativity constraint (short-selling is allowed). Does NOT use
+cvxpy, scipy.optimize, sklearn, or any off-the-shelf solver -- the entire
+algorithm is implemented in pure numpy per the approved design (Gate 2).
 
-Người đọc mục tiêu là dân TỐI ƯU HOÁ. Phase 4 verify chéo kết quả bằng
-CVXPY; bản FIX (xem mục "FIX-ROUND: joint prox" bên dưới) đã sửa lỗi
-prox-then-project của bản đầu (bị cross-check CVXPY phát hiện phá sparsity)
-bằng joint prox chính xác qua bisection -- số liệu so sánh với CVXPY sau
-fix nằm trong task-3-report.md.
+The intended reader is an OPTIMIZATION person. Phase 4 cross-verifies the
+result against CVXPY; the FIX version (see the "FIX-ROUND: joint prox"
+section below) fixed a prox-then-project bug in the first version (caught
+by the CVXPY cross-check, which broke sparsity) using an exact joint prox
+via bisection -- the comparison numbers against CVXPY after the fix are in
+task-3-report.md.
 
 ---------------------------------------------------------------------------
-Công thức subgradient (điểm mấu chốt, dễ sai)
+Subgradient formula (the key point, easy to get wrong)
 ---------------------------------------------------------------------------
-f(w) có 3 thành phần không trơn / khó vi phân trực tiếp: term robust
-`kappa*||Sigma^(1/2) w||_2` (không khả vi tại w=0, nhưng thường w != 0 nên
-khả vi hầu khắp nơi) và term `lam*||w||_1` (không khả vi tại w_i=0, xử lý
-riêng bằng prox, xem bên dưới). Phần còn lại (`-mu^T w + gamma*w^T Sigma w`)
-khả vi trơn thông thường.
+f(w) has 3 components that are non-smooth / not directly differentiable:
+the robust term `kappa*||Sigma^(1/2) w||_2` (not differentiable at w=0, but
+usually w != 0 so it is differentiable almost everywhere) and the term
+`lam*||w||_1` (not differentiable at w_i=0, handled separately via prox,
+see below). The rest (`-mu^T w + gamma*w^T Sigma w`) is ordinary smooth
+differentiable.
 
-Đạo hàm của `||Sigma^(1/2) w||_2` theo w: đặt u = Sigma^(1/2) w. Với g(w) =
-||u||_2 = sqrt(u^T u) = sqrt(w^T Sigma^(1/2) Sigma^(1/2) w) = sqrt(w^T Sigma
-w) (vì Sigma^(1/2) đối xứng nên (Sigma^(1/2))^T Sigma^(1/2) = Sigma^(1/2)
-Sigma^(1/2) = Sigma). Do đó:
+Derivative of `||Sigma^(1/2) w||_2` with respect to w: let u = Sigma^(1/2)
+w. With g(w) = ||u||_2 = sqrt(u^T u) = sqrt(w^T Sigma^(1/2) Sigma^(1/2) w) =
+sqrt(w^T Sigma w) (since Sigma^(1/2) is symmetric, so (Sigma^(1/2))^T
+Sigma^(1/2) = Sigma^(1/2) Sigma^(1/2) = Sigma). Therefore:
 
     d/dw ||u||_2 = (Sigma w) / ||u||_2 = (Sigma w) / ||Sigma^(1/2) w||_2
 
-QUAN TRỌNG: tử số là `Sigma @ w` (dùng Sigma đầy đủ), KHÔNG PHẢI
-`Sigma^(1/2) @ w` -- nhầm giữa hai cái này là lỗi phổ biến. Lý do: chain
-rule qua u = Sigma^(1/2) w cho ra Jacobian (Sigma^(1/2))^T = Sigma^(1/2) (vì
-đối xứng), rồi (Sigma^(1/2))^T @ u = Sigma^(1/2) @ (Sigma^(1/2) @ w) =
-Sigma @ w.
+IMPORTANT: the numerator is `Sigma @ w` (using the full Sigma), NOT
+`Sigma^(1/2) @ w` -- confusing the two is a common mistake. Reason: the
+chain rule through u = Sigma^(1/2) w gives Jacobian (Sigma^(1/2))^T =
+Sigma^(1/2) (since it is symmetric), then (Sigma^(1/2))^T @ u =
+Sigma^(1/2) @ (Sigma^(1/2) @ w) = Sigma @ w.
 
-Khi ||Sigma^(1/2) w||_2 <= eps (w gần 0 theo chuẩn Sigma^(1/2), về lý thuyết
-chỉ đúng đại số nếu w=0 do Sigma^(1/2) PSD), hàm không khả vi -- ta chọn
-subgradient = 0 (một phần tử hợp lệ của tập dưới vi phân tại điểm kỳ dị,
-vì 0 luôn thuộc dưới vi phân của norm tại gốc). Điều này tránh chia cho 0 /
-NaN. Xem `_robust_subgrad`.
+When ||Sigma^(1/2) w||_2 <= eps (w near 0 in the Sigma^(1/2) norm, which in
+theory is only exactly true algebraically if w=0, since Sigma^(1/2) is
+PSD), the function is not differentiable -- we choose subgradient = 0 (a
+valid element of the subdifferential set at the singular point, since 0
+always belongs to the subdifferential of a norm at the origin). This
+avoids division by 0 / NaN. See `_robust_subgrad`.
 
 ---------------------------------------------------------------------------
-Thuật toán mỗi vòng lặp k (đã duyệt, bản FIX sau cross-check CVXPY --
-xem "FIX-ROUND: joint prox" bên dưới để biết lý do đổi bước 3-4)
+Algorithm per iteration k (approved, FIX version after CVXPY cross-check --
+see "FIX-ROUND: joint prox" below for the reason steps 3-4 changed)
 ---------------------------------------------------------------------------
-1. Subgradient phần trơn + robust (KHÔNG gồm L1 -- L1 xử lý bằng prox):
+1. Subgradient of the smooth + robust part (NOT including L1 -- L1 is
+   handled via prox):
        v = -mu + 2*gamma*Sigma@w_k + robust_subgrad(w_k)
-2. Bước xuống theo subgradient: z = w_k - alpha_k * v
-3. JOINT PROX của (L1 + chỉ số ràng buộc {1^T w = 1}) tại z, ngưỡng
-   t = alpha_k * lam -- MỘT bước duy nhất, xem `_prox_l1_simplex_eq`:
+2. Descent step along the subgradient: z = w_k - alpha_k * v
+3. JOINT PROX of (L1 + the indicator of the constraint {1^T w = 1}) at z,
+   threshold t = alpha_k * lam -- A SINGLE step, see `_prox_l1_simplex_eq`:
        w_{k+1} = _prox_l1_simplex_eq(z, t)
 
-Bước 2-3 hợp thành một "proximal-subgradient step" chuẩn: subgradient step
-cho phần trơn+robust, rồi prox CHÍNH XÁC (không tách rời) của phần không
-trơn còn lại (L1 + ràng buộc affine cùng lúc). Xem chứng minh + cách giải
-trong "FIX-ROUND: joint prox" bên dưới.
+Steps 2-3 together form a standard "proximal-subgradient step": a
+subgradient step for the smooth+robust part, followed by the EXACT prox
+(not decoupled) of the remaining non-smooth part (L1 + the affine
+constraint, simultaneously). See the proof + derivation in "FIX-ROUND:
+joint prox" below.
 
-Step size giảm dần: alpha_k = alpha0 / sqrt(k+1) -- lựa chọn kinh điển cho
-subgradient method (đảm bảo sum(alpha_k)=inf, sum(alpha_k^2)<inf, điều kiện
-đủ cho hội tụ của subgradient method trên hàm lồi).
+Decreasing step size: alpha_k = alpha0 / sqrt(k+1) -- the classic choice
+for the subgradient method (ensures sum(alpha_k)=inf, sum(alpha_k^2)<inf,
+a sufficient condition for convergence of the subgradient method on a
+convex function).
 
 ---------------------------------------------------------------------------
-FIX-ROUND: joint prox của lam*||w||_1 + I{1^T w=1} (thay cho prox-then-
-project tách rời ở bản đầu)
+FIX-ROUND: joint prox of lam*||w||_1 + I{1^T w=1} (replacing the decoupled
+prox-then-project of the first version)
 ---------------------------------------------------------------------------
-BẢN ĐẦU (đã bị controller/CVXPY cross-check phát hiện lỗi): soft-threshold
-L1 rồi CHIẾU RIÊNG lên hyperplane bằng cách cộng offset đều
-`(1-sum(w_half))/N` vào MỌI toạ độ. Offset này cộng vào CẢ toạ độ vừa bị
-soft-threshold về đúng 0 -- "hồi sinh" toàn bộ toạ độ zero thành một giá trị
-nhỏ giống nhau, phá sparsity thật (vd trên data thật: active=48 trong khi
-CVXPY active=9 cho kappa=0,gamma=5,lam=0.1; objective gap 2.7-6%). Đây
-không phải prox chuẩn của (L1 + ràng buộc affine) -- chỉ là prox L1 rồi
-chiếu Euclid tách rời, hai phép toán KHÔNG hoán đổi được với nhau.
+FIRST VERSION (bug caught by the controller/CVXPY cross-check):
+soft-threshold L1, then PROJECT SEPARATELY onto the hyperplane by adding
+an equal offset `(1-sum(w_half))/N` to EVERY coordinate. This offset gets
+added to coordinates that were JUST soft-thresholded to exactly 0 as well
+-- "reviving" every zero coordinate into a small identical value, breaking
+true sparsity (e.g. on real data: active=48 while CVXPY active=9 for
+kappa=0,gamma=5,lam=0.1; objective gap 2.7-6%). This is NOT the true prox
+of (L1 + the affine constraint) -- it is just L1 prox followed by a
+decoupled Euclidean projection, two operations that do NOT commute with
+each other.
 
-BẢN FIX: giải trực tiếp prox CHÍNH XÁC của `lam*||w||_1 + I{1^T w=1}` tại
-điểm z (kết quả sau subgradient step), tức:
+FIX VERSION: directly solve the EXACT prox of `lam*||w||_1 + I{1^T w=1}`
+at point z (the result after the subgradient step), i.e.:
 
     w* = argmin_w  (1/2)||w - z||_2^2 + t*||w||_1   s.t.  1^T w = 1,
-    với t = alpha_k * lam (thang đo Moreau envelope chuẩn: chọn t = alpha_k
-    * lam để phép prox này khớp đúng vai trò của bước 3 cũ trong sơ đồ
-    proximal-subgradient, tức vẫn tương đương "soft-threshold ngưỡng
-    alpha_k*lam" khi bỏ ràng buộc).
+    with t = alpha_k * lam (the standard Moreau envelope scale: choosing
+    t = alpha_k * lam makes this prox match exactly the role of the old
+    step 3 in the proximal-subgradient scheme, i.e. it is still equivalent
+    to "soft-threshold at threshold alpha_k*lam" when the constraint is
+    dropped).
 
-Đưa ràng buộc vào bằng nhân tử Lagrange nu (scalar):
+Introduce the constraint via a Lagrange multiplier nu (scalar):
     L(w, nu) = (1/2)||w-z||_2^2 + t*||w||_1 + nu*(1^T w - 1)
-Tách theo từng toạ độ i (bài toán tách được hoàn toàn theo i với nu cố
-định), tối thiểu hoá:
+Separating by coordinate i (the problem fully decouples over i for a
+fixed nu), minimize:
     (1/2)(w_i - z_i)^2 + nu*w_i + t*|w_i|
-Hoàn thiện bình phương: (1/2)(w_i-z_i)^2 + nu*w_i
-    = (1/2)(w_i - (z_i - nu))^2 + hằng số (không phụ thuộc w_i)
-=> bài toán từng toạ độ trở thành prox L1 chuẩn tại điểm dịch chuyển
-(z_i - nu), ngưỡng t:
+Complete the square: (1/2)(w_i-z_i)^2 + nu*w_i
+    = (1/2)(w_i - (z_i - nu))^2 + a constant (not depending on w_i)
+=> the per-coordinate problem becomes a standard L1 prox at the shifted
+point (z_i - nu), threshold t:
     w_i(nu) = soft_threshold(z_i - nu, t)
             = sign(z_i - nu) * max(|z_i - nu| - t, 0)
 
-(Quy ước dấu: đặt nu' = -nu, viết lại w_i = soft_threshold(z_i + nu', t) --
-đây chính là công thức trong `_prox_l1_simplex_eq`, biến `nu` trong code
-tương ứng nu' ở đây; dấu của nu không quan trọng, chỉ là biến cần tìm bằng
-bisection.)
+(Sign convention: setting nu' = -nu, rewrite as w_i =
+soft_threshold(z_i + nu', t) -- this is exactly the formula in
+`_prox_l1_simplex_eq`, where the code variable `nu` corresponds to nu'
+here; the sign of nu does not matter, it is just the variable to be found
+via bisection.)
 
-Chọn nu (hay nu') sao cho ràng buộc 1^T w = 1 thoả mãn:
+Choose nu (or nu') so that the constraint 1^T w = 1 is satisfied:
     g(nu) := sum_i soft_threshold(z_i + nu, t) = 1
 
-g(nu) là hàm liên tục, KHÔNG GIẢM theo nu (mỗi số hạng soft_threshold(.,t)
-không giảm theo đối số của nó, đối số tăng tuyến tính theo nu với hệ số 1)
-và không bị chặn cả hai phía (nu -> -inf => g -> -inf, nu -> +inf => g ->
-+inf) => tồn tại nu* (có thể không duy nhất nếu g phẳng đúng tại 1, nhưng
-mọi nu trong đoạn phẳng đó đều cho nghiệm w hợp lệ) sao cho g(nu*) = 1, tìm
-bằng BISECTION:
-1. Bracket: bắt đầu [nu_lo, nu_hi] = [-1, 1], nhân đôi nu_lo (nếu g(nu_lo) >
-   1) hoặc nu_hi (nếu g(nu_hi) < 1) tới khi bracket đúng hướng.
-2. Bisection ~100 vòng hoặc tới khi |g(nu_mid) - 1| < 1e-12.
-3. w = soft_threshold(z + nu*, t) -- vector cuối, có toạ độ = 0 CHÍNH XÁC
-   với mọi i thoả |z_i + nu*| <= t, và sum(w) = 1 (tới sai số bisection).
+g(nu) is a continuous, NON-DECREASING function of nu (each
+soft_threshold(.,t) term is non-decreasing in its argument, and the
+argument increases linearly in nu with coefficient 1) and unbounded in
+both directions (nu -> -inf => g -> -inf, nu -> +inf => g -> +inf) => a nu*
+exists (possibly not unique if g is exactly flat at 1, but any nu on that
+flat segment gives a valid solution w) such that g(nu*) = 1, found via
+BISECTION:
+1. Bracket: start with [nu_lo, nu_hi] = [-1, 1], double nu_lo (if
+   g(nu_lo) > 1) or nu_hi (if g(nu_hi) < 1) until the bracket points the
+   right way.
+2. Bisect for ~100 rounds or until |g(nu_mid) - 1| < 1e-12.
+3. w = soft_threshold(z + nu*, t) -- the final vector, with coordinates
+   EXACTLY = 0 for every i satisfying |z_i + nu*| <= t, and sum(w) = 1
+   (up to bisection tolerance).
 
-Đây là prox CHÍNH XÁC (không phải heuristic) của (L1 + ràng buộc affine)
-tại z -- khác biệt so với bản đầu ở chỗ offset không còn cộng đều vào MỌI
-toạ độ nữa, mà chỉ dịch chuyển ĐỐI SỐ trước khi soft-threshold, nên toạ độ
-đã bị threshold về 0 (|z_i+nu*| <= t) VẪN LÀ 0 sau khi cộng offset -- không
-"hồi sinh". Xem `_prox_l1_simplex_eq` để biết cài đặt, và mục "Verify chéo
-CVXPY sau fix" trong task-3-report.md cho số liệu thật xác nhận active/gap
-cải thiện đáng kể so với bản đầu.
-
----------------------------------------------------------------------------
-Vì sao trả BEST-ITERATE, không phải iterate cuối
----------------------------------------------------------------------------
-Subgradient method (khác gradient method trên hàm trơn) KHÔNG đảm bảo
-f(w_{k+1}) <= f(w_k) -- dãy f(w_k) có thể dao động không đơn điệu, đặc biệt
-ở các vòng đầu khi alpha_k còn lớn. Đây là tính chất TOÁN HỌC cố hữu của
-subgradient method, không phải lỗi cài đặt. Do đó ta theo dõi best_obj =
-min_{j<=k} f(w_j) và trả best_w tương ứng, thay vì w cuối cùng -- đây là
-thực hành chuẩn khi dùng subgradient method (xem Boyd, "Subgradient
-Methods" notes).
+This is the EXACT prox (not a heuristic) of (L1 + the affine constraint)
+at z -- the difference from the first version is that the offset is no
+longer added equally to EVERY coordinate, but instead shifts the ARGUMENT
+before soft-thresholding, so a coordinate already thresholded to 0 (where
+|z_i+nu*| <= t) STAYS 0 after adding the offset -- no "revival". See
+`_prox_l1_simplex_eq` for the implementation, and the "Cross-verify
+against CVXPY after the fix" section in task-3-report.md for real numbers
+confirming the significant improvement in active/gap compared to the
+first version.
 
 ---------------------------------------------------------------------------
-Lựa chọn alpha0 mặc định (TINH CHỈNH LẠI sau FIX joint prox)
+Why return the BEST-ITERATE, not the last iterate
 ---------------------------------------------------------------------------
-Daily returns rất nhỏ: mu ~ 1e-3, Sigma ~ 1e-4 -> phần "trơn" của subgradient
-(-mu + 2*gamma*Sigma@w) có magnitude ~ 1e-3..1e-2 tuỳ gamma, trong khi robust
-term kappa*Sigma@w/||.|| có magnitude ~ kappa (order 1 vì đã chia norm).
+The subgradient method (unlike the gradient method on a smooth function)
+does NOT guarantee f(w_{k+1}) <= f(w_k) -- the sequence f(w_k) can
+oscillate non-monotonically, especially in the early rounds when alpha_k
+is still large. This is an inherent MATHEMATICAL property of the
+subgradient method, not an implementation bug. We therefore track
+best_obj = min_{j<=k} f(w_j) and return the corresponding best_w, instead
+of the final w -- this is standard practice when using the subgradient
+method (see Boyd, "Subgradient Methods" notes).
 
-Với bản prox-then-project CŨ, alpha0 lớn làm sparsity bị offset "hồi sinh"
-(xem lịch sử trong mục "FIX-ROUND" ở trên) -- nên trước đây phải chọn alpha0
-NHỎ (0.1) để giữ sparsity, đánh đổi hội tụ chậm/best_obj kém hơn. Với joint
-prox (bản FIX), vấn đề đó KHÔNG còn: toạ độ bị threshold về 0 vẫn là 0 dù
-alpha0 lớn, nên KHÔNG còn đánh đổi giữa sparsity và tốc độ hội tụ -- alpha0
-lớn hơn vừa hội tụ nhanh hơn (patience trigger sớm), vừa best_obj thấp hơn
-(hoặc bằng), vừa sparsity bằng hoặc TỐT hơn.
+---------------------------------------------------------------------------
+Choice of the default alpha0 (RE-TUNED after the joint prox FIX)
+---------------------------------------------------------------------------
+Daily returns are very small: mu ~ 1e-3, Sigma ~ 1e-4 -> the "smooth" part
+of the subgradient (-mu + 2*gamma*Sigma@w) has magnitude ~ 1e-3..1e-2
+depending on gamma, while the robust term kappa*Sigma@w/||.|| has
+magnitude ~ kappa (order 1, since it is already divided by the norm).
 
-Thử nghiệm thật trên data/returns.parquet (97 tài sản, max_iter=20000, xem
-task-3-report.md mục "Fix-round: tinh chỉnh lại alpha0") với alpha0 in
-{0.01, 0.05, 0.1, 0.3, 1, 3, 10, 30, 100, 300} cho ba bộ tham số
+With the OLD prox-then-project version, a large alpha0 caused sparsity to
+be "revived" by the offset (see the history in the "FIX-ROUND" section
+above) -- so previously alpha0 had to be chosen SMALL (0.1) to preserve
+sparsity, trading off against slower convergence/worse best_obj. With the
+joint prox (FIX version), that problem is GONE: a coordinate thresholded
+to 0 stays 0 regardless of how large alpha0 is, so there is NO LONGER a
+trade-off between sparsity and convergence speed -- a larger alpha0 both
+converges faster (patience triggers sooner) and gives a lower (or equal)
+best_obj, as well as equal or BETTER sparsity.
+
+Real experiments on data/returns.parquet (97 assets, max_iter=20000, see
+task-3-report.md section "Fix-round: re-tuning alpha0") with alpha0 in
+{0.01, 0.05, 0.1, 0.3, 1, 3, 10, 30, 100, 300} for three parameter sets
 (kappa=1,gamma=5,lam=0.01), (kappa=0,gamma=5,lam=0.1),
-(kappa=1,gamma=5,lam=0.001): best_obj và active/sparsity đều CẢI THIỆN đơn
-điệu (hoặc bão hoà) khi alpha0 tăng từ 0.01 -> 10, sau đó ổn định (alpha0=10,
-30 cho kết quả gần như giống hệt alpha0=1..3 nhưng hội tụ nhanh hơn nhiều
-lần: vài trăm tới vài nghìn vòng thay vì hết max_iter). Ở alpha0=100 (bộ
-kappa=1,gamma=5,lam=0.001), bước đầu quá dài gây dao động mạnh khiến
-best-iterate mắc kẹt sớm tại điểm KÉM (best_obj tệ hơn hẳn, active=97) --
-"converged" giả giống hiện tượng đã thấy ở bản cũ. Do đó cần alpha0 đủ lớn
-để hội tụ nhanh nhưng chưa chạm vùng mất ổn định đó.
+(kappa=1,gamma=5,lam=0.001): best_obj and active/sparsity both improved
+MONOTONICALLY (or plateaued) as alpha0 increased from 0.01 -> 10, then
+stabilized (alpha0=10, 30 give results nearly identical to alpha0=1..3 but
+converge many times faster: a few hundred to a few thousand rounds instead
+of running out max_iter). At alpha0=100 (the kappa=1,gamma=5,lam=0.001
+set), the first step is too large, causing strong oscillation that traps
+the best-iterate early at a POOR point (best_obj much worse, active=97) --
+a false "converged" resembling the phenomenon already seen in the old
+version. Hence alpha0 needs to be large enough for fast convergence but
+not so large as to reach that unstable region.
 
-ĐƯỢC CHỌN: ALPHA0_DEFAULT = 10.0 -- nằm giữa vùng ổn định (10, 30 cho kết
-quả gần như tối ưu quan sát được trong grid, trong khi 100 đã mất ổn định ở
-một bộ tham số) với biên an toàn 3x trước ngưỡng mất ổn định gần nhất quan
-sát được (30 -> 100). Caller vẫn có thể truyền alpha0 khác nếu cần (vd bộ
-tham số khác biệt scale nhiều so với daily returns VN100). Số liệu đầy đủ
-xem task-3-report.md.
+CHOSEN: ALPHA0_DEFAULT = 10.0 -- sitting within the stable region (10, 30
+give results nearly optimal as observed in the grid, while 100 already
+became unstable for one parameter set) with a 3x safety margin before the
+nearest observed instability threshold (30 -> 100). The caller can still
+pass a different alpha0 if needed (e.g. a parameter set with a very
+different scale from VN100 daily returns). Full numbers are in
+task-3-report.md.
 """
 
 from __future__ import annotations
@@ -191,10 +213,11 @@ __all__ = [
     "solve_long_only",
 ]
 
-# Ngưỡng an toàn chia-cho-0 khi tính subgradient của ||Sigma^(1/2) w||_2.
+# Safe division-by-0 threshold when computing the subgradient of
+# ||Sigma^(1/2) w||_2.
 _EPS_NORM = 1e-12
 
-# Xem "Lựa chọn alpha0 mặc định" ở docstring module.
+# See "Choice of the default alpha0" in the module docstring.
 ALPHA0_DEFAULT = 10.0
 
 
@@ -209,19 +232,20 @@ def portfolio_objective(
 ) -> float:
     """f(w) = -mu^T w + kappa*||Sigma^(1/2) w||_2 + gamma*w^T Sigma w + lam*||w||_1.
 
-    Trả giá trị đầy đủ của hàm mục tiêu (KHÔNG gồm ràng buộc 1^T w = 1 --
-    caller tự đảm bảo w feasible nếu muốn giá trị có ý nghĩa cho bài toán
-    ràng buộc; hàm này chỉ tính f(w) tại w bất kỳ, kể cả w không feasible,
-    hữu ích cho Phase 4 khi CVXPY cần so sánh giá trị mục tiêu tại nghiệm
-    của nó).
+    Returns the full value of the objective function (NOT including the
+    constraint 1^T w = 1 -- the caller must ensure w is feasible on its
+    own if it wants the value to be meaningful for the constrained
+    problem; this function just computes f(w) at any w, including
+    infeasible w, which is useful for Phase 4 when CVXPY needs to compare
+    the objective value at its own solution).
 
     Parameters
     ----------
     w : np.ndarray, shape (N,)
     mu : np.ndarray, shape (N,)
     sigma : np.ndarray, shape (N,N)
-    sigma_sqrt : np.ndarray, shape (N,N)  -- căn bậc hai đối xứng PSD của sigma
-    kappa, gamma, lam : float, hệ số không âm
+    sigma_sqrt : np.ndarray, shape (N,N)  -- symmetric PSD square root of sigma
+    kappa, gamma, lam : float, non-negative coefficients
 
     Returns
     -------
@@ -242,15 +266,16 @@ def _robust_subgrad(
     kappa: float,
     eps: float = _EPS_NORM,
 ) -> np.ndarray:
-    """Subgradient của kappa*||Sigma^(1/2) w||_2 theo w.
+    """Subgradient of kappa*||Sigma^(1/2) w||_2 with respect to w.
 
-    = kappa * (Sigma @ w) / ||Sigma^(1/2) w||_2   nếu ||Sigma^(1/2) w||_2 > eps
-    = 0 (vector)                                   nếu ||Sigma^(1/2) w||_2 <= eps
+    = kappa * (Sigma @ w) / ||Sigma^(1/2) w||_2   if ||Sigma^(1/2) w||_2 > eps
+    = 0 (vector)                                   if ||Sigma^(1/2) w||_2 <= eps
 
-    LƯU Ý: tử số là Sigma @ w (ma trận Sigma đầy đủ), KHÔNG PHẢI
-    Sigma_sqrt @ w -- xem giải thích chain-rule ở docstring module. Nhánh
-    eps tránh chia cho 0 / NaN khi w gần 0 theo chuẩn Sigma^(1/2) (chọn 0,
-    một phần tử hợp lệ của tập dưới vi phân norm tại điểm kỳ dị).
+    NOTE: the numerator is Sigma @ w (the full Sigma matrix), NOT
+    Sigma_sqrt @ w -- see the chain-rule explanation in the module
+    docstring. The eps branch avoids division by 0 / NaN when w is near 0
+    in the Sigma^(1/2) norm (choosing 0, a valid element of the
+    subdifferential of the norm at the singular point).
     """
     u = sigma_sqrt @ w
     norm_u = float(np.linalg.norm(u))
@@ -267,47 +292,52 @@ def _prox_l1_simplex_eq(
     max_bracket_expand: int = 200,
     max_bisect_iter: int = 200,
 ) -> np.ndarray:
-    """Prox CHÍNH XÁC của `t*||w||_1 + I{1^T w = 1}` tại điểm z.
+    """EXACT prox of `t*||w||_1 + I{1^T w = 1}` at point z.
 
-    Giải:
+    Solves:
         w* = argmin_w  (1/2)||w-z||_2^2 + t*||w||_1   s.t.  1^T w = 1
 
-    Đạo hàm đầy đủ (Lagrangian, tách theo toạ độ) nằm ở docstring module,
-    mục "FIX-ROUND: joint prox". Tóm tắt: với nu là nhân tử Lagrange (dấu đã
-    quy ước để công thức là +nu, xem docstring module),
+    The full derivation (Lagrangian, separated by coordinate) is in the
+    module docstring, section "FIX-ROUND: joint prox". Summary: with nu as
+    the Lagrange multiplier (sign convention chosen so the formula is
+    +nu, see the module docstring),
 
         w_i(nu) = soft_threshold(z_i + nu, t) = sign(z_i+nu)*max(|z_i+nu|-t, 0)
 
-    và ta cần tìm nu sao cho g(nu) := sum_i w_i(nu) = 1. g liên tục, KHÔNG
-    GIẢM theo nu (mỗi số hạng không giảm theo đối số của nó), không bị chặn
-    hai phía -- luôn tồn tại nghiệm, tìm bằng BISECTION (không có công thức
-    đóng vì soft_threshold không tuyến tính toàn cục do đoạn phẳng quanh 0).
+    and we need to find nu such that g(nu) := sum_i w_i(nu) = 1. g is
+    continuous, NON-DECREASING in nu (each term is non-decreasing in its
+    argument), unbounded in both directions -- a solution always exists,
+    found via BISECTION (there is no closed form since soft_threshold is
+    not globally linear due to the flat segment around 0).
 
-    Kết quả: toạ độ i có |z_i + nu*| <= t sẽ là 0 CHÍNH XÁC (không bị "hồi
-    sinh" bởi phần chiếu ràng buộc như bản heuristic prox-then-project cũ
-    -- xem CAVEAT lịch sử trong docstring module), và sum(w) = 1 tới sai số
-    `bisect_tol`.
+    Result: a coordinate i with |z_i + nu*| <= t will be EXACTLY 0 (not
+    "revived" by the constraint-projection part like the old heuristic
+    prox-then-project version -- see the historical CAVEAT in the module
+    docstring), and sum(w) = 1 up to `bisect_tol`.
 
     Parameters
     ----------
     z : np.ndarray, shape (N,)
-        Điểm cần lấy prox (kết quả sau subgradient step: z = w_k - alpha_k*v).
+        The point to take the prox of (the result after the subgradient
+        step: z = w_k - alpha_k*v).
     t : float, >= 0
-        Ngưỡng soft-threshold (= alpha_k * lam trong `solve`). t=0 ->
-        hàm rút gọn về đúng phép chiếu Euclid lên hyperplane {1^T w=1}
-        (không có soft-threshold), vì soft_threshold(x, 0) = x.
+        The soft-threshold threshold (= alpha_k * lam in `solve`). t=0 ->
+        the function reduces exactly to the Euclidean projection onto the
+        hyperplane {1^T w=1} (no soft-thresholding), since
+        soft_threshold(x, 0) = x.
     nu_init : float, default 1.0
-        Biên khởi tạo bracket [-nu_init, nu_init] trước khi mở rộng.
+        The initial bracket boundary [-nu_init, nu_init] before expansion.
     bisect_tol : float, default 1e-12
-        Ngưỡng |g(nu)-1| để dừng bisection.
+        The |g(nu)-1| threshold for stopping bisection.
     max_bracket_expand, max_bisect_iter : int
-        Giới hạn an toàn số vòng mở rộng bracket / bisection (tránh vòng lặp
-        vô hạn trong trường hợp số học biên; về lý thuyết luôn hội tụ).
+        Safety limits on the number of bracket-expansion / bisection
+        rounds (avoids an infinite loop in numerically edge-case
+        situations; theoretically it always converges).
 
     Returns
     -------
-    np.ndarray, shape (N,), thoả sum(w) ~= 1 (tới bisect_tol) và có thể có
-    toạ độ bằng 0 chính xác.
+    np.ndarray, shape (N,), satisfying sum(w) ~= 1 (up to bisect_tol) and
+    possibly having coordinates equal to exactly 0.
     """
     z = np.asarray(z, dtype=np.float64)
 
@@ -349,28 +379,31 @@ def _smooth_subgrad(
     gamma: float,
     eps: float = _EPS_NORM,
 ) -> np.ndarray:
-    """v = -mu + 2*gamma*Sigma@w + robust_subgrad(w) (KHÔNG gồm phần L1,
-    L1 xử lý riêng bằng joint prox `_prox_l1_simplex_eq` trong `solve`)."""
+    """v = -mu + 2*gamma*Sigma@w + robust_subgrad(w) (NOT including the L1
+    part, L1 is handled separately via the joint prox `_prox_l1_simplex_eq`
+    in `solve`)."""
     return -mu + 2.0 * gamma * (sigma @ w) + _robust_subgrad(w, sigma, sigma_sqrt, kappa, eps)
 
 
 @dataclass
 class SolveResult:
-    """Kết quả trả về bởi `solve`.
+    """Result returned by `solve`.
 
     w : np.ndarray, shape (N,)
-        Nghiệm BEST-ITERATE (KHÔNG phải iterate cuối -- xem docstring module
-        "Vì sao trả best-iterate").
+        The BEST-ITERATE solution (NOT the final iterate -- see the
+        module docstring "Why return the best-iterate").
     obj_history : np.ndarray, shape (n_iter,)
-        f(w_k) tại MỖI vòng lặp thực sự chạy (w_k đã feasible vì đã chiếu
-        hyperplane), theo thứ tự thời gian -- KHÔNG phải running-min.
+        f(w_k) at EVERY round actually run (w_k is already feasible since
+        it has already been projected onto the hyperplane), in time
+        order -- NOT a running-min.
     best_obj : float
-        min(obj_history) = f(w) tại w trả về.
+        min(obj_history) = f(w) at the returned w.
     n_iter : int
-        Số vòng lặp thực sự đã chạy (<= max_iter).
+        Number of rounds actually run (<= max_iter).
     converged : bool
-        True nếu dừng do relative-change của best_obj < tol trong `patience`
-        vòng liên tiếp; False nếu dừng do chạm max_iter.
+        True if it stopped because the relative change of best_obj < tol
+        for `patience` consecutive rounds; False if it stopped by hitting
+        max_iter.
     """
 
     w: np.ndarray
@@ -394,28 +427,31 @@ def solve(
     patience: int = 100,
     w0: np.ndarray | None = None,
 ) -> SolveResult:
-    """Giải min_w f(w) s.t. 1^T w = 1 bằng proximal-subgradient tự viết.
+    """Solve min_w f(w) s.t. 1^T w = 1 with the hand-written
+    proximal-subgradient method.
 
-    Xem docstring module cho công thức thuật toán đầy đủ, đạo hàm robust
-    term, lý do trả best-iterate, và mục "FIX-ROUND: joint prox" (bước
-    L1 + ràng buộc affine giải CHÍNH XÁC bằng bisection, không còn heuristic
-    prox-then-project của bản đầu).
+    See the module docstring for the full algorithm formula, the
+    derivation of the robust term, the reason for returning the
+    best-iterate, and the "FIX-ROUND: joint prox" section (the L1 +
+    affine-constraint step is solved EXACTLY via bisection, no longer the
+    heuristic prox-then-project of the first version).
 
     Parameters
     ----------
     mu, sigma, sigma_sqrt : np.ndarray
-        Xem `portfolio_objective`.
+        See `portfolio_objective`.
     kappa, gamma, lam : float
-        Hệ số không âm của robust / variance / L1 term.
+        Non-negative coefficients for the robust / variance / L1 terms.
     max_iter : int, default 5000
-    alpha0 : float, default ALPHA0_DEFAULT (=10.0, xem docstring module)
+    alpha0 : float, default ALPHA0_DEFAULT (=10.0, see the module docstring)
         alpha_k = alpha0 / sqrt(k+1).
     tol : float, default 1e-8
-        Ngưỡng relative-change của best_obj để coi là "đã ổn định".
+        Relative-change threshold of best_obj to consider it "stabilized".
     patience : int, default 100
-        Số vòng liên tiếp relative-change < tol để dừng sớm (converged=True).
+        Number of consecutive rounds with relative-change < tol before
+        stopping early (converged=True).
     w0 : np.ndarray | None, default None
-        Điểm khởi tạo; None -> vector đều 1/N (feasible: sum=1).
+        Starting point; None -> the uniform vector 1/N (feasible: sum=1).
 
     Returns
     -------
@@ -446,10 +482,11 @@ def solve(
         v = _smooth_subgrad(w, mu, sigma, sigma_sqrt, kappa, gamma)
         z = w - alpha_k * v
 
-        # Joint prox CHÍNH XÁC của (lam*||.||_1 + I{1^T w=1}) tại z, ngưỡng
-        # alpha_k*lam -- xem docstring module "FIX-ROUND: joint prox" và
-        # `_prox_l1_simplex_eq`. Thay thế bản cũ (soft-threshold rồi chiếu
-        # tách rời) vốn phá sparsity do offset cộng đều vào mọi toạ độ.
+        # EXACT joint prox of (lam*||.||_1 + I{1^T w=1}) at z, threshold
+        # alpha_k*lam -- see the module docstring "FIX-ROUND: joint prox"
+        # and `_prox_l1_simplex_eq`. Replaces the old version
+        # (soft-threshold then decoupled projection) which broke sparsity
+        # due to the offset being added equally to every coordinate.
         w = _prox_l1_simplex_eq(z, alpha_k * lam)
 
         f_w = portfolio_objective(w, mu, sigma, sigma_sqrt, kappa, gamma, lam)
@@ -483,35 +520,40 @@ def solve(
 
 
 # ---------------------------------------------------------------------------
-# Walk-forward Task 1: nhánh long-only (w >= 0, sum(w) = 1)
+# Walk-forward Task 1: long-only branch (w >= 0, sum(w) = 1)
 # ---------------------------------------------------------------------------
-# Dưới ràng buộc long-only, ||w||_1 = sum_i |w_i| = sum_i w_i = 1 (vì mọi
-# w_i >= 0) LÀ HẰNG SỐ trên toàn miền khả thi -- phạt lam*||w||_1 không còn
-# tác dụng điều khiển nghiệm (nó chỉ cộng thêm đúng "lam" vào objective, một
-# hằng số không phụ thuộc w) nên bị loại khỏi nhánh này hoàn toàn (không có
-# tham số lam trong `portfolio_objective_long_only` / `solve_long_only`).
-# Xem docs/superpowers/specs/2026-07-26-walk-forward-backtest-design.md mục 2.
+# Under the long-only constraint, ||w||_1 = sum_i |w_i| = sum_i w_i = 1
+# (since every w_i >= 0) IS A CONSTANT over the entire feasible domain --
+# the penalty lam*||w||_1 no longer has any effect on controlling the
+# solution (it just adds exactly "lam" to the objective, a constant not
+# depending on w) so it is dropped entirely from this branch (there is no
+# lam parameter in `portfolio_objective_long_only` / `solve_long_only`).
+# See docs/superpowers/specs/2026-07-26-walk-forward-backtest-design.md
+# section 2.
 #
-# Phần "trơn + robust" của subgradient (-mu + 2*gamma*Sigma@w +
-# robust_subgrad(w)) giữ NGUYÊN công thức như nhánh long-short ở trên -- tái
-# dùng trực tiếp `_smooth_subgrad` (không sửa, không copy lại công thức) để
-# tránh lệch pha với `solve()` nếu công thức đó có thay đổi sau này. Điểm
-# khác biệt DUY NHẤT so với `solve()`: bước "prox" của (L1 + ràng buộc affine)
-# được thay bằng phép CHIẾU EUCLID lên simplex `{w>=0, sum(w)=1}`
-# (`simplex_projection`, thuật toán Duchi et al. 2008) -- vì không còn L1
-# nên không cần joint-prox qua bisection như `_prox_l1_simplex_eq`.
+# The "smooth + robust" part of the subgradient (-mu + 2*gamma*Sigma@w +
+# robust_subgrad(w)) KEEPS the SAME formula as the long-short branch above
+# -- directly reuses `_smooth_subgrad` (not modified, not re-copied) to
+# avoid drifting out of sync with `solve()` if that formula changes in the
+# future. The ONLY difference from `solve()`: the "prox" step of (L1 +
+# affine constraint) is replaced by a EUCLIDEAN PROJECTION onto the
+# simplex `{w>=0, sum(w)=1}` (`simplex_projection`, the Duchi et al. 2008
+# algorithm) -- since there is no more L1, there is no need for the
+# bisection-based joint-prox like `_prox_l1_simplex_eq`.
 # ---------------------------------------------------------------------------
 
 
 def simplex_projection(v: np.ndarray) -> np.ndarray:
-    """Chiếu Euclid vector v lên probability simplex {w : w>=0, sum(w)=1}.
+    """Euclidean projection of vector v onto the probability simplex
+    {w : w>=0, sum(w)=1}.
 
-    Thuật toán Duchi, Shalev-Shwartz, Singer, Chandra (2008) "Efficient
-    Projections onto the l1-Ball for Learning in High Dimensions", O(N log N):
-    sort v giảm dần thành u; tìm rho = chỉ số lớn nhất j sao cho
-    u_j - (cumsum(u)_j - 1)/j > 0; theta = (cumsum(u)_rho - 1)/rho;
-    w = max(v - theta, 0). Kết quả LUÔN thoả w>=0 và sum(w)=1 (tới sai số
-    số học), bất kể v là gì -- không cần v đã "gần" simplex.
+    The Duchi, Shalev-Shwartz, Singer, Chandra (2008) algorithm "Efficient
+    Projections onto the l1-Ball for Learning in High Dimensions",
+    O(N log N): sort v in descending order into u; find rho = the largest
+    index j such that u_j - (cumsum(u)_j - 1)/j > 0; theta =
+    (cumsum(u)_rho - 1)/rho; w = max(v - theta, 0). The result ALWAYS
+    satisfies w>=0 and sum(w)=1 (up to numerical error), regardless of
+    what v is -- v does not need to already be "close" to the simplex.
 
     Parameters
     ----------
@@ -519,7 +561,8 @@ def simplex_projection(v: np.ndarray) -> np.ndarray:
 
     Returns
     -------
-    np.ndarray, shape (N,), thoả w>=0 (tới sai số số học) và sum(w)=1.
+    np.ndarray, shape (N,), satisfying w>=0 (up to numerical error) and
+    sum(w)=1.
     """
     v = np.asarray(v, dtype=np.float64)
     n = v.shape[0]
@@ -527,7 +570,7 @@ def simplex_projection(v: np.ndarray) -> np.ndarray:
     cumsum_u = np.cumsum(u)
     j = np.arange(1, n + 1)
     cond = u - (cumsum_u - 1) / j > 0
-    rho = np.nonzero(cond)[0][-1]  # chỉ số 0-based của j lớn nhất thoả cond
+    rho = np.nonzero(cond)[0][-1]  # 0-based index of the largest j satisfying cond
     theta = (cumsum_u[rho] - 1) / (rho + 1)
     return np.maximum(v - theta, 0.0)
 
@@ -542,15 +585,16 @@ def portfolio_objective_long_only(
 ) -> float:
     """f(w) = -mu^T w + kappa*||Sigma^(1/2) w||_2 + gamma*w^T Sigma w.
 
-    Giống `portfolio_objective` nhưng KHÔNG có term `lam*||w||_1` -- dưới
-    ràng buộc long-only (w>=0, sum(w)=1) thì ||w||_1 = sum(w) = 1 là hằng số,
-    phạt L1 không còn tác dụng điều khiển nghiệm nên bị loại (xem docstring
-    ở khối "Walk-forward Task 1" phía trên).
+    Same as `portfolio_objective` but WITHOUT the `lam*||w||_1` term --
+    under the long-only constraint (w>=0, sum(w)=1), ||w||_1 = sum(w) = 1
+    is a constant, so the L1 penalty no longer has any effect on
+    controlling the solution and is dropped (see the docstring in the
+    "Walk-forward Task 1" block above).
 
     Parameters
     ----------
-    w, mu, sigma, sigma_sqrt : np.ndarray -- xem `portfolio_objective`.
-    kappa, gamma : float, hệ số không âm.
+    w, mu, sigma, sigma_sqrt : np.ndarray -- see `portfolio_objective`.
+    kappa, gamma : float, non-negative coefficients.
 
     Returns
     -------
@@ -576,31 +620,36 @@ def solve_long_only(
     patience: int = 100,
     w0: np.ndarray | None = None,
 ) -> SolveResult:
-    """Giải min_w f(w) s.t. w>=0, sum(w)=1 bằng projected-subgradient tự viết.
+    """Solve min_w f(w) s.t. w>=0, sum(w)=1 with the hand-written
+    projected-subgradient method.
 
-    Cùng sơ đồ vòng lặp như `solve()` (subgradient step trên phần trơn+robust
-    qua `_smooth_subgrad`, KHÔNG sửa/copy lại công thức, rồi bước "prox"),
-    chỉ khác bước prox: ở đây không còn term L1 (xem khối docstring
-    "Walk-forward Task 1" phía trên) nên bước prox rút gọn thành phép chiếu
-    Euclid lên simplex qua `simplex_projection` (Duchi et al. 2008), thay cho
-    `_prox_l1_simplex_eq` của nhánh long-short. Cùng lý do trả BEST-ITERATE
-    (subgradient method không đảm bảo đơn điệu) như `solve()` -- xem docstring
-    module mục "Vì sao trả BEST-ITERATE".
+    Same iteration scheme as `solve()` (subgradient step on the
+    smooth+robust part via `_smooth_subgrad`, NOT modified/re-copied, then
+    the "prox" step), differing only in the prox step: here there is no
+    more L1 term (see the "Walk-forward Task 1" docstring block above) so
+    the prox step reduces to a Euclidean projection onto the simplex via
+    `simplex_projection` (Duchi et al. 2008), replacing
+    `_prox_l1_simplex_eq` of the long-short branch. Same reason for
+    returning the BEST-ITERATE (the subgradient method does not guarantee
+    monotonicity) as `solve()` -- see the module docstring section "Why
+    return the BEST-ITERATE".
 
     Parameters
     ----------
     mu, sigma, sigma_sqrt : np.ndarray
-        Xem `portfolio_objective`.
-    kappa, gamma : float, hệ số không âm.
+        See `portfolio_objective`.
+    kappa, gamma : float, non-negative coefficients.
     max_iter : int, default 5000
     alpha0 : float, default ALPHA0_DEFAULT
         alpha_k = alpha0 / sqrt(k+1).
     tol : float, default 1e-8
-        Ngưỡng relative-change của best_obj để coi là "đã ổn định".
+        Relative-change threshold of best_obj to consider it "stabilized".
     patience : int, default 100
-        Số vòng liên tiếp relative-change < tol để dừng sớm (converged=True).
+        Number of consecutive rounds with relative-change < tol before
+        stopping early (converged=True).
     w0 : np.ndarray | None, default None
-        Điểm khởi tạo; None -> vector đều 1/N (feasible: w>=0, sum=1).
+        Starting point; None -> the uniform vector 1/N (feasible: w>=0,
+        sum=1).
 
     Returns
     -------
@@ -631,8 +680,9 @@ def solve_long_only(
         v = _smooth_subgrad(w, mu, sigma, sigma_sqrt, kappa, gamma)
         z = w - alpha_k * v
 
-        # Chiếu Euclid lên simplex {w>=0, sum(w)=1} -- thay cho joint prox
-        # (L1 + hyperplane) của solve(), vì nhánh long-only không có L1.
+        # Euclidean projection onto the simplex {w>=0, sum(w)=1} --
+        # replaces the joint prox (L1 + hyperplane) of solve(), since the
+        # long-only branch has no L1.
         w = simplex_projection(z)
 
         f_w = portfolio_objective_long_only(w, mu, sigma, sigma_sqrt, kappa, gamma)

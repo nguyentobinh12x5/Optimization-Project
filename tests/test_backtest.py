@@ -120,7 +120,7 @@ def test_simulate_period_wipeout_caps_return_and_zeros_remaining_days():
     )
     # port_ret ngày 1 = 5.0*(-0.5) + (-4.0)*0.6 = -2.5 - 2.4 = -4.9 <= -1.0 -> vỡ nợ
 
-    with pytest.warns(RuntimeWarning, match="vỡ nợ"):
+    with pytest.warns(RuntimeWarning, match="wiped out"):
         daily_net, turnover, cost, w_end, wiped_out = _simulate_period(
             w_start, period_returns, prev_weights_drifted=None, fee=0.0,
         )
@@ -449,7 +449,7 @@ def test_index_buy_and_hold_backtest_warns_on_missing_dates():
     short_index = oos_index[:-1]
     index_returns = pd.Series(0.001, index=short_index)
 
-    with pytest.warns(UserWarning, match="ngày OOS"):
+    with pytest.warns(UserWarning, match="OOS days"):
         out = index_buy_and_hold_backtest(index_returns, oos_index, fee=0.0)
 
     assert len(out) == 4

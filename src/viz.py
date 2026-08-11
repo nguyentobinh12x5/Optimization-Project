@@ -633,6 +633,102 @@ def fig6_prox_vs_cvxpy(
 
 
 # ---------------------------------------------------------------------------
+# Fig 2b -- suboptimality gap f(w_k) - f* trên trục log-log
+# ---------------------------------------------------------------------------
+
+def fig2b_suboptimality(
+    mu: np.ndarray,
+    sigma: np.ndarray,
+    sigma_sqrt: np.ndarray,
+    param_sets: list[dict] | None = None,
+    *,
+    max_iter: int = 5000,
+    save: bool = True,
+) -> Figure:
+    """Suboptimality gap f(w_k) - f* theo iteration k, trục log-log.
+
+    Khác `fig2_convergence` (vẽ f(w_k) thô, hội tụ nhanh nên trông phẳng):
+    hình này trừ đi f* = giá trị tối ưu TOÀN CỤC lấy từ CVXPY/CLARABEL, nên
+    thấy rõ TỐC ĐỘ hội tụ. Vẽ kèm đường tham chiếu O(1/sqrt(k)) -- tốc độ lý
+    thuyết của subgradient method với step size alpha_k = alpha0/sqrt(k+1)
+    (xem Boyd & Vandenberghe 2004, ch. 'Subgradient methods').
+
+    Dùng best-iterate f_best(k) = min_{j<=k} f(w_j) chứ không phải f(w_k) thô,
+    khớp với giá trị `solve()` thực sự trả về (SolveResult.w là best-iterate,
+    không phải iterate cuối) -- subgradient method KHÔNG giảm đơn điệu nên
+    f(w_k) thô sẽ dao động và không thể hiện đúng cái thuật toán trả ra.
+
+    Parameters
+    ----------
+    mu, sigma, sigma_sqrt : np.ndarray
+        Xem `src.prox_solver.portfolio_objective`.
+    param_sets : list[dict] | None
+        Mỗi dict {"kappa":.., "gamma":.., "lam":..}. None -> 3 bộ mặc định
+        gồm 1 bộ có lam=0 để minh hoạ trường hợp hội tụ CHẬM (không có
+        soft-threshold thì prox rút về phép chiếu thuần, mất luôn tác dụng
+        tăng tốc của sparsity -- xem thảo luận trong report).
+    max_iter : int, default 5000
+    save : bool, default True
+
+    Returns
+    -------
+    matplotlib Figure
+    """
+    from src.cvxpy_check import cvxpy_solve
+    from src.prox_solver import solve
+
+    _apply_style()
+    if param_sets is None:
+        param_sets = [
+            {"kappa": 1.0, "gamma": 5.0, "lam": 0.01},
+            {"kappa": 0.0, "gamma": 5.0, "lam": 0.10},
+            {"kappa": 0.0, "gamma": 5.0, "lam": 0.0},
+        ]
+
+    fig, ax = plt.subplots(figsize=(7.0, 4.4))
+
+    for idx, ps in enumerate(param_sets):
+        kappa, gamma, lam = float(ps["kappa"]), float(ps["gamma"]), float(ps["lam"])
+        res = solve(mu, sigma, sigma_sqrt, kappa, gamma, lam, max_iter=max_iter)
+        _, f_star = cvxpy_solve(mu, sigma, sigma_sqrt, kappa, gamma, lam)
+
+        # best-iterate: đúng cái solve() trả về
+        f_best = np.minimum.accumulate(res.obj_history)
+        gap = f_best - f_star
+        # clip sàn: gap có thể xuống 0 hoặc âm nhẹ do sai số số học của CẢ hai
+        # solver -- log scale không vẽ được <= 0.
+        gap = np.maximum(gap, 1e-16)
+        k = np.arange(1, len(gap) + 1)
+
+        ax.loglog(
+            k, gap,
+            color=CAT_COLORS[idx % len(CAT_COLORS)],
+            linestyle=_COMPARISON_LINESTYLES[idx % len(_COMPARISON_LINESTYLES)],
+            linewidth=1.8,
+            label=rf"$\kappa$={kappa:g}, $\gamma$={gamma:g}, $\lambda$={lam:g}",
+        )
+
+    # Đường tham chiếu O(1/sqrt(k)), neo vào điểm đầu của series đầu tiên.
+    k_ref = np.logspace(0, np.log10(max_iter), 50)
+    ax.loglog(
+        k_ref, 1e-2 / np.sqrt(k_ref),
+        color=INK_MUTED, linestyle=":", linewidth=1.4,
+        label=r"$O(1/\sqrt{k})$ reference",
+    )
+
+    ax.set_xlabel("Iteration $k$")
+    ax.set_ylabel(r"Suboptimality  $f_{\mathrm{best}}(k) - f^\star$")
+    ax.set_title("Convergence to the CVXPY/CLARABEL Optimum")
+    ax.grid(True, which="both", alpha=0.4)
+    ax.legend(title="Parameter set", loc="lower left")
+
+    fig.tight_layout()
+    if save:
+        _save(fig, "fig2b_suboptimality")
+    return fig
+
+
+# ---------------------------------------------------------------------------
 # Fig 7 -- backtest walk-forward: đường cong tài sản tích luỹ vs benchmark
 # ---------------------------------------------------------------------------
 

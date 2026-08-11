@@ -2,89 +2,67 @@
 
 \subsection{Computational efficiency and solution quality}
 
-CLARABEL solves \cref{eq:main} in roughly a dozen interior-point iterations at $N = 98$
-(\cref{tab:demo}: 14 and 11 for the two representative solves), each forming and factorizing a
-KKT system at $O(N^3)$, in tens of milliseconds. That cost is what makes the walk-forward
-backtest of \cref{sec:backtest} practical: 25 rebalances, each re-solving the problem 12--60
-times across a parameter grid, still complete in well under a minute. The tradeoff is the one an
-interior-point method always makes at larger scale --- the $O(N^3)$ factorization cost would
-dominate at $N$ in the thousands, where a first-order method's cheaper $O(N^2)$ iterations become
-attractive despite needing more of them --- but at this problem's size that scale is not reached,
-so the choice is not close. On solution quality: the budget constraint is satisfied to $10^{-12}$,
-and convexity (\cref{sec:correctness}) guarantees the reported optimum is global, not merely a
-point some local search happened to stop at.
+The two solvers trade off as expected (\cref{sec:cost}): CLARABEL wins $\sim6\times$ on speed at
+$N=98$ ($25$\,ms/$14$ $O(N^3)$ iterations vs.\ $146$\,ms/$528$ $O(N^2)$ iterations), an ordering
+that would reverse at $N$ in the thousands and that makes the walk-forward's $12$--$60$ re-solves
+per rebalance practical. On solution quality, convexity guarantees any correct solver reaches the
+global optimum, and \cref{tab:verification} confirms two algorithms sharing no code agree to
+$10^{-8}$--$10^{-6}$ relative terms with identical active sets in every configuration but one,
+reported rather than omitted (\cref{sec:verification}); the proximal method's exact zeros are
+what justify the active-set thresholds used throughout.
 
 \subsection{Limitations}
 
 \begin{itemize}
-  \item \textbf{Survivorship bias:} current VN100 membership applied backward over four years,
-        so delisted and removed tickers are absent.
-  \item \textbf{$\muhat$ remains a poor estimator:} \cref{sec:backtest} shows the consequence
-        concretely --- an early, unconstrained long-only run put a full month's capital in one
-        ticker on the strength of its trailing sample mean, then lost $9.47\%$ the next month. The
-        robust term does not blunt this ($\kappa$ is not selected as helpful at all); a per-ticker
-        weight cap does, by making such bets infeasible rather than merely discouraged.
-  \item \textbf{No prediction model, and no predict-then-optimize benchmark:} every $\muhat$ in
-        this report is the trailing sample mean over the estimation window --- a backward-looking
-        statistic, not a forecast, and \cref{sec:identification} states this as a modelling
-        choice rather than treating it as settled. The natural benchmark this report does
-        \emph{not} run is a predict-then-optimize pipeline: fit a return predictor (even a simple
-        one, e.g.\ ridge regression or an EWMA-momentum score, on the same estimation window)
-        in place of the sample mean, feed its output into the identical \cref{eq:main}, and
-        walk-forward test it against A--F exactly as designed. Two things make this a genuinely
-        separate follow-on rather than a small addition: it introduces a new source of look-ahead
-        risk distinct from the ones already guarded against here (a predictor must be refit,
-        not just re-estimated, inside each rolling window), and it changes the object under
-        test from ``which configuration of one convex objective wins'' to ``does a better
-        $\muhat$ matter more than which configuration is chosen'' --- a different empirical
-        question, worth asking, but not the one this report answers.
-  \item \textbf{The $\kappa$ finding now holds out of sample, too:} B outperforms A on Sharpe
-        under an identical selection criterion, and $\kappa=0$ is selected in $18$ of $25$
-        periods --- still an observation on one covariance structure, but not an in-sample
-        artifact.
-  \item \textbf{Unconstrained leverage is a distinct, more severe failure mode:} \cref{sec:ef}'s
-        long-short variants, with no cap on gross exposure $\norm{w}_1$, suffered total capital
-        loss --- not merely higher risk than the long-only variants, but a different failure kind,
-        driven by validation-Sharpe selection occasionally choosing a near-zero $\lambda$ against a
-        still-noisy $\hat\Sigma$. A leverage cap $\norm{w}_1\le L$ is the natural fix and is left
-        as future work.
-  \item \textbf{The out-of-sample window is short:} roughly 24 months, a single market regime, not
-        extrapolable to other cycles.
-  \item \textbf{Validation overfitting:} selecting hyperparameters on a six-month window mildly
-        fits the validation set --- inherent to short-window walk-forward, and the direct cause
-        both of A/B's turnover-driven cost disadvantage and, more severely, of \cref{sec:ef}'s
-        leverage episodes.
-  \item \textbf{A single historical path:} no bootstrap, so no confidence interval accompanies the
-        reported Sharpe ratios or drawdowns.
-  \item \textbf{Costs are modelled crudely:} flat $0.20\%$ of turnover, no market-impact, slippage,
-        or margin-call mechanism --- the last mattering specifically for \cref{sec:ef}, where a
-        real broker would force deleveraging long before a $100\times$-exposure position reached
-        total loss.
+  \item \textbf{Survivorship bias:} current VN100 membership applied backward over four years;
+        delisted or removed tickers are absent.
+  \item \textbf{$\muhat$ remains a poor estimator:} an early unconstrained run put a month's
+        capital in one ticker on its trailing sample mean, then lost $9.47\%$ the next month. The
+        robust term does not blunt this --- $\kappa$ is not selected as helpful, and this now
+        holds out of sample too ($\kappa=0$ selected in $18$ of $25$ periods) --- the
+        concentration cap does, by making such bets infeasible rather than merely discouraged.
+  \item \textbf{No prediction model:} $\muhat$ is always the trailing sample mean, never a
+        forecast. A predict-then-optimize benchmark (predictor $\to$ same \cref{eq:main}) is a
+        genuinely separate follow-on with new look-ahead risk, not attempted here.
+  \item \textbf{Unconstrained leverage is a distinct, more severe failure mode:} E/F's total
+        capital loss is driven by validation-Sharpe selection choosing near-zero $\lambda$ against
+        a still-noisy $\hat\Sigma$, and structurally so, since arithmetic Sharpe is blind to
+        volatility drag (\cref{sec:results7}). A leverage cap $\norm{w}_1\le L$ is the natural
+        fix, left as future work.
+  \item \textbf{Other caveats:} a short, single-regime OOS window ($\sim24$ months); a six-month
+        validation slice that mildly overfits hyperparameters (the direct cause of A/B's turnover
+        cost and E/F's leverage episodes); a single historical path, so no bootstrap confidence
+        interval; and a flat $0.20\%$-of-turnover cost model with no slippage, market-impact, or
+        margin calls --- the last mattering for \cref{sec:ef}, where a real broker would force
+        deleveraging long before a $100\times$-exposure position reached total loss.
 \end{itemize}
 
 \subsection{Conclusion}
 
 The problem was formulated as a convex, second-order-cone representable program in which the
-robust term is derived as an exact worst-case objective over an ellipsoidal uncertainty set
-rather than assumed, and the $\ell_1$ penalty serves both as a convex surrogate for the number of
-holdings and as a cap on gross leverage. Convexity and the conic reformulation \cref{eq:socp}
-together license solving it directly with CVXPY/CLARABEL: every local minimum is global, so a
-general-purpose interior-point solver's reported optimum is provably the optimum, with no
-custom algorithm and no independent check required to trust it. Out of sample, six variants
-were walk-forward tested over 494 trading days
-and 25 monthly rebalances (\cref{sec:backtest}). The two long-only variants beat both passive
-benchmarks on a risk-adjusted basis, the classical ($\kappa=0$) variant outperforming its robust
-counterpart --- confirming out of sample that the robust term does not help on this universe ---
-at $4$--$6\times$ the benchmarks' fees from monthly re-selection of the risk-aversion parameter. A
-per-ticker concentration constraint, added after an early run's single-ticker portfolio lost
-$9.47\%$ in a month, accounts for most of that improvement and is a substantive finding in its own
-right, not a tuning detail. The unconstrained long-short variants, by contrast, suffered total
-capital loss --- categorically worse than anything in the long-only comparison, traced to
-unbounded leverage interacting with short-window parameter selection.
+robust term is derived as an exact worst-case objective over an ellipsoidal uncertainty set, and
+the $\ell_1$ penalty serves both as a sparsity surrogate and a leverage cap. It was solved by a
+proximal-subgradient method (\cref{sec:algorithm}) whose prox step handles the $\ell_1$ penalty
+and budget constraint jointly and exactly, by bisection, so soft-thresholded zeros survive rather
+than being revived by a separate projection; convexity makes that local iteration globally
+optimal, and an independent interior-point solve confirms it to six significant figures with
+identical active sets (\cref{sec:verification}). Out of sample, six variants were walk-forward
+tested over $494$ trading days and $25$ monthly rebalances (\cref{sec:backtest}): the two
+long-only variants beat both passive benchmarks on a risk-adjusted basis, the classical
+($\kappa=0$) variant outperforming its robust counterpart --- confirming out of sample that the
+robust term does not help on this universe --- at $4$--$6\times$ the benchmarks' fees from monthly
+re-selection of the risk-aversion parameter. A per-ticker concentration constraint, added after an
+early run's single-ticker portfolio lost $9.47\%$ in a month, accounts for most of that
+improvement and is a substantive finding, not a tuning detail. The unconstrained long-short
+variants, by contrast, suffered total capital loss --- categorically worse than anything in the
+long-only comparison, traced to unbounded leverage interacting with short-window parameter
+selection.
 
-The methodological lesson is a narrower one than a hand-written implementation would have taught:
-at $N = 98$, a convex, conic-representable objective is exactly the class of problem an
-off-the-shelf interior-point solver is built for, and convexity's global-optimality guarantee
-removes the need to verify its answer against anything else. The scale where a custom first-order
-method would earn its added complexity --- $N$ in the thousands, or a nonconvex extension no
-conic solver can represent --- is not this one.\label{sec:endofbody}
+The methodological lesson concerns what convexity does and does not buy. It is a property of the
+\emph{problem}: it promotes the limit of a local, first-order iteration into the global optimum,
+and it guarantees that two correct solvers must agree. It says nothing about whether a given
+implementation is correct, and a mis-derived subgradient or a prematurely terminated root-find
+returns a feasible-looking answer in silence. Writing the algorithm and checking it against an
+independent solver are therefore complementary rather than redundant --- the first is what makes
+the sparsity counts exact and the method extensible beyond what a conic solver can represent, the
+second is what makes either believable.\label{sec:endofbody}

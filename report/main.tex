@@ -1,8 +1,8 @@
-\documentclass[11pt,a4paper]{article}
+\documentclass[10pt,a4paper]{article}
 
 \raggedbottom
 
-\usepackage[margin=0.9in]{geometry}
+\usepackage[margin=0.85in]{geometry}
 \usepackage{enumitem}
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
@@ -15,6 +15,7 @@
 \usepackage[numbers]{natbib}
 \usepackage{hyperref}
 \usepackage{cleveref}
+\usepackage{titlesec}
 
 \graphicspath{{figures/}}
 
@@ -31,6 +32,12 @@
 \setlength{\intextsep}{8pt plus 2pt minus 2pt}
 \setlength{\abovecaptionskip}{4pt}
 \setlength{\belowcaptionskip}{2pt}
+\setlength{\abovedisplayskip}{5pt plus 1pt minus 2pt}
+\setlength{\belowdisplayskip}{5pt plus 1pt minus 2pt}
+\setlength{\abovedisplayshortskip}{3pt plus 1pt minus 1pt}
+\setlength{\belowdisplayshortskip}{3pt plus 1pt minus 1pt}
+\titlespacing*{\section}{0pt}{8pt plus 2pt minus 2pt}{4pt plus 1pt minus 1pt}
+\titlespacing*{\subsection}{0pt}{6pt plus 1pt minus 1pt}{2pt plus 1pt minus 1pt}
 
 % Shorthands used throughout the report.
 \newcommand{\R}{\mathbb{R}}
@@ -75,8 +82,8 @@
 Portfolio Optimization: A Walk-Forward\\[0.3em]
 Empirical Study on the VN100 Universe\par}
 \vspace{0.8cm}
-{\large A convex, second-order-cone program\\
-solved directly with CVXPY/CLARABEL\par}
+{\large A proximal-subgradient method,\\
+verified against CVXPY/CLARABEL\par}
 \vspace{2.5cm}
 {\large\bfseries Nguyen To Binh\par}
 {\large Student ID: 1010051\par}
@@ -102,6 +109,7 @@ solved directly with CVXPY/CLARABEL\par}
 \input{sections/01-problem-identification}
 \input{sections/02-problem-modeling}
 \input{sections/03-model-correctness}
+\input{sections/04-algorithm}
 \input{sections/05-data}
 \input{sections/06-results-insample}
 \input{sections/07-backtest}
