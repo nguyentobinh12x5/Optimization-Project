@@ -1,8 +1,10 @@
 \section{Data}\label{sec:data}
 
 Constituents of the VN100 index were obtained through the \texttt{vnstock} library
-\citep{vnstock}, and $N = 98$ tickers survive cleaning. The price panel spans
-\textbf{2022-07-26 to 2026-07-24} ($997 \times 98$), and the derived simple-return panel
+\citep{vnstock}. Of the \textbf{100} listed constituents, $N = 98$ tickers survive cleaning ---
+two are dropped for insufficient trading history within the 4-year window: no price data in the
+first few sessions (listed too late) or more than $10\%$ of sessions missing. The price panel
+spans \textbf{2022-07-26 to 2026-07-24} ($997 \times 98$), and the derived simple-return panel
 spans \textbf{2022-07-27 to 2026-07-24} ($965 \times 98$). All results in this report use that
 return panel.
 
