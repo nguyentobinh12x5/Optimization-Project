@@ -97,6 +97,31 @@
 \section{The Model}
 % ============================================================
 
+\begin{frame}{Warm-up: what is $w$, concretely?}
+  \textbf{$w$ is the decision variable} --- one number per stock, the \emph{fraction of
+  capital} put into it.
+  \vspace{0.12cm}
+  \textbf{Toy example, 3 stocks:} split capital across A, B, C:
+  \[
+    w_A = 0.3, \quad w_B = 0.3, \quad w_C = 0.4, \qquad w_A+w_B+w_C = 1
+  \]
+  30\% of capital in A, 30\% in B, 40\% in C --- \textbf{always summing to 1} (all the capital
+  gets used, none left idle).
+  \vspace{0.12cm}
+  If each stock's expected return is $\muhat_A=10\%$, $\muhat_B=5\%$, $\muhat_C=8\%$, this
+  portfolio's expected return is just a weighted average:
+  \[
+    w^\top\muhat = 0.3(10\%) + 0.3(5\%) + 0.4(8\%) = 7.7\%
+  \]
+  \vspace{0.12cm}
+  \textbf{Simplest possible question:} choose $w$ to make return as large as possible ---
+  \[
+    \max_{w}\ w^\top\muhat \quad \text{s.t.}\quad w_A+w_B+w_C=1
+  \]
+  \small The obvious (and naive) answer: put \textbf{100\% into A} (highest $\muhat$) --- but
+  that ignores risk entirely. Fixing that is exactly what the full model does next.
+\end{frame}
+
 \begin{frame}{Four objectives $\to$ four terms}
   \begin{equation}\label{eq:main}
     \min_{w \in \R^{98}} \quad
