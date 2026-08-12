@@ -11,7 +11,7 @@ slide — cứ đọc theo, không cần nhớ thêm.
 "Chào thầy/cô và các bạn. Nhóm em trình bày đề tài Robust and Sparse Mean-Variance
 Portfolio Optimization, áp dụng trên rổ VN100. Em là Bình,
 đây là Giang. Tụi em sẽ đi qua bài toán, cách giải, cách kiểm chứng lời giải, và kết
-quả backtest ngoài mẫu."
+quả backtest ngoài mẫu." 
 
 ---
 
@@ -38,7 +38,7 @@ hình.
 Và điều quan trọng: liệu từng lựa chọn đó có thực sự giúp ích hay không, tụi em
 không giả định trước — sẽ kiểm chứng bằng thực nghiệm trên chính VN100, và câu trả
 lời không hiển nhiên như trực giác."
-
+ 
 ---
 
 ## Slide 2 — Four objectives → four terms (~55s)
