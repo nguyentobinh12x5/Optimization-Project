@@ -14,7 +14,7 @@ what justify the active-set thresholds used throughout.
 \subsection{Limitations}
 
 \begin{itemize}
-  \item \textbf{Survivorship bias:} current VN100 membership applied backward over four years;
+  \item \textbf{Survivorship bias:} current VN100 tickers applied backward over four years;
         delisted or removed tickers are absent.
   \item \textbf{$\muhat$ remains a poor estimator:} an early unconstrained run put a month's
         capital in one ticker on its trailing sample mean, then lost $9.47\%$ the next month. The
@@ -24,45 +24,51 @@ what justify the active-set thresholds used throughout.
   \item \textbf{No prediction model:} $\muhat$ is always the trailing sample mean, never a
         forecast. A predict-then-optimize benchmark (predictor $\to$ same \cref{eq:main}) is a
         genuinely separate follow-on with new look-ahead risk, not attempted here.
-  \item \textbf{Unconstrained leverage is a distinct, more severe failure mode:} E/F's total
-        capital loss is driven by validation-Sharpe selection choosing near-zero $\lambda$ against
-        a still-noisy $\hat\Sigma$, and structurally so, since arithmetic Sharpe is blind to
-        volatility drag (\cref{sec:results7}). A leverage cap $\norm{w}_1\le L$ is the natural
-        fix, left as future work.
-  \item \textbf{Other caveats:} a short, single-regime OOS window ($\sim24$ months); a six-month
-        validation slice that mildly overfits hyperparameters (the direct cause of A/B's turnover
-        cost and E/F's leverage episodes); a single historical path, so no bootstrap confidence
-        interval; and a flat $0.20\%$-of-turnover cost model with no slippage, market-impact, or
-        margin calls --- the last mattering for \cref{sec:ef}, where a real broker would force
-        deleveraging long before a $100\times$-exposure position reached total loss.
 \end{itemize}
 
 \subsection{Conclusion}
 
-The problem was formulated as a convex, second-order-cone representable program in which the
-robust term is derived as an exact worst-case objective over an ellipsoidal uncertainty set, and
-the $\ell_1$ penalty serves both as a sparsity surrogate and a leverage cap. It was solved by a
-proximal-subgradient method (\cref{sec:algorithm}) whose prox step handles the $\ell_1$ penalty
-and budget constraint jointly and exactly, by bisection, so soft-thresholded zeros survive rather
-than being revived by a separate projection; convexity makes that local iteration globally
-optimal, and an independent interior-point solve confirms it to six significant figures with
-identical active sets (\cref{sec:verification}). Out of sample, six variants were walk-forward
-tested over $494$ trading days and $25$ monthly rebalances (\cref{sec:backtest}): the two
-long-only variants beat both passive benchmarks on a risk-adjusted basis, the classical
-($\kappa=0$) variant outperforming its robust counterpart --- confirming out of sample that the
-robust term does not help on this universe --- at $4$--$6\times$ the benchmarks' fees from monthly
-re-selection of the risk-aversion parameter. A per-ticker concentration constraint, added after an
-early run's single-ticker portfolio lost $9.47\%$ in a month, accounts for most of that
-improvement and is a substantive finding, not a tuning detail. The unconstrained long-short
-variants, by contrast, suffered total capital loss --- categorically worse than anything in the
-long-only comparison, traced to unbounded leverage interacting with short-window parameter
-selection.
+\textbf{This paper does not argue that one method is best.} As stated from the outset
+(\cref{sec:identification}), no single formula is best for every market. The contribution is
+instead a single convex objective, \cref{eq:main}, whose terms can be switched on, off, or tuned
+to collapse into \textbf{four distinct investment strategies} as special cases --- robust or
+classical, long-only or long-short --- plus two passive benchmarks used for comparison. Which of
+the four an investor should actually run is an empirical question that depends on their risk
+tolerance and holding preferences and on the statistical character of the specific market traded;
+the results below report what that choice looked like for VN100 over this sample, not a universal
+ranking.
 
-The methodological lesson concerns what convexity does and does not buy. It is a property of the
-\emph{problem}: it promotes the limit of a local, first-order iteration into the global optimum,
-and it guarantees that two correct solvers must agree. It says nothing about whether a given
-implementation is correct, and a mis-derived subgradient or a prematurely terminated root-find
-returns a feasible-looking answer in silence. Writing the algorithm and checking it against an
-independent solver are therefore complementary rather than redundant --- the first is what makes
-the sparsity counts exact and the method extensible beyond what a conic solver can represent, the
-second is what makes either believable.\label{sec:endofbody}
+\begin{itemize}
+  \item \textbf{Formulation:} a convex, second-order-cone representable program in which the
+        robust term is derived as an exact worst-case objective over an ellipsoidal uncertainty
+        set, and the $\ell_1$ penalty serves both as a sparsity surrogate and a leverage cap.
+
+  \item \textbf{Solver:} a proximal-subgradient method (\cref{sec:algorithm}) whose prox step
+        handles the $\ell_1$ penalty and budget constraint jointly and exactly, by bisection, so
+        soft-thresholded zeros survive rather than being revived by a separate projection;
+        convexity makes that local iteration globally optimal, and an independent interior-point
+        solve confirms it to six significant figures with identical active sets
+        (\cref{sec:verification}).
+
+  \item \textbf{Out-of-sample result:} six variants were walk-forward tested over $494$ trading
+        days and $25$ monthly rebalances (\cref{sec:backtest}). The two long-only variants beat
+        both passive benchmarks on a risk-adjusted basis, with the classical ($\kappa=0$) variant
+        outperforming its robust counterpart --- confirming out of sample that the robust term does
+        not help on this universe --- at $4$--$6\times$ the benchmarks' fees from monthly
+        re-selection of the risk-aversion parameter.
+
+  \item \textbf{What drove the long-only result:} a per-ticker concentration constraint, added
+        after an early run's single-ticker portfolio lost $9.47\%$ in a month, accounts for most
+        of that improvement and is a substantive finding, not a tuning detail.
+
+  \item \textbf{What broke the long-short variants:} the unconstrained long-short variants, by
+        contrast, suffered total capital loss --- categorically worse than anything in the
+        long-only comparison, traced to unbounded leverage interacting with short-window parameter
+        selection.
+\end{itemize}
+
+Taken together, the long-only, concentration-capped configuration is the one this sample
+recommends for an investor who wants a bounded, self-financing position on VN100 today; the
+robust and long-short terms remain available in \cref{eq:main} and may earn their keep on a
+market with noisier means, higher correlation risk, or a bound on total leverage --- a question
+left open, not settled, by this study.

@@ -1,32 +1,48 @@
 # Sparse + Robust Portfolio Optimization — VN100
 
+**Nguyen To Binh** (1010051) & **Vu Van Giang** (1010036) — Optimization course project,
+instructor Cai Yutong.
+
 A portfolio optimization project for the **VN100** basket (98 Vietnamese stocks after data
-cleaning, 4 years of daily returns) using the **sparse + robust mean-variance** formulation:
+cleaning, 4 years of daily returns). The goal is not to crown one "best" method: one convex
+objective is stated and its terms are switched on/off/tuned to collapse into **four investment
+strategies** — robust or classical, long-only or long-short — plus two passive benchmarks, then
+the choice among them is settled empirically for VN100 by walk-forward backtest.
 
 ```
 min_w  -μ̂ᵀw + κ‖Σ^(1/2)w‖₂ + γ·wᵀΣw + λ‖w‖₁   s.t.  1ᵀw = 1
 ```
 
-which combines 4 objectives in a single convex problem: maximizing expected return,
-penalizing risk in both a robust sense (ℓ2-norm of `Σ^(1/2)w`) and a classic Markowitz
-sense (quadratic), and encouraging a **sparse** portfolio (few names held) via an L1
-penalty — short selling is allowed (no `w ≥ 0` constraint). The main solver is a
-**proximal-subgradient method written from scratch in pure numpy** (no cvxpy/
-scipy.optimize/sklearn), with an **exact** prox step for `L1 + budget constraint` solved
-via bisection (soft-thresholding + finding the Lagrange multiplier `ν`). Results are
-**cross-verified** against CVXPY (interior-point solver CLARABEL) as an independent
-"ground truth".
+Four terms, one convex problem: maximize expected return, penalize risk in both a robust sense
+(exact worst-case return over an ellipsoidal uncertainty set on `μ̂`) and a classic Markowitz
+sense (quadratic variance), and encourage a **sparse** portfolio (few names held) via an L1
+penalty, which also caps gross leverage. The main solver is a **proximal-subgradient method
+written from scratch in pure numpy** (no cvxpy/scipy.optimize/sklearn), with an **exact** prox
+step for `L1 + budget constraint` solved via bisection (soft-thresholding + finding the Lagrange
+multiplier `ν`). Results are **cross-verified** against CVXPY (interior-point solver CLARABEL) as
+an independent "ground truth" — six significant figures, identical active sets.
 
-Beyond the in-sample analysis above, the project also includes an **out-of-sample
-walk-forward backtest** (module `src/backtest.py`): a 24-month rolling window (18 months
-estimation + 6 months validation), monthly rebalancing, long-only (`w≥0, Σw=1`),
-automatic reselection of `(κ,γ)` each period via Sharpe validation, transaction costs, and
-comparison against an equal-weight 1/N benchmark — see the "Walk-forward backtest"
-section below.
+Beyond the in-sample analysis, the project runs an **out-of-sample walk-forward backtest**
+(`src/backtest.py`): a 24-month rolling window (18 months estimation + 6 months validation),
+monthly rebalancing over 494 trading days / 25 rebalances, automatic reselection of
+hyperparameters each period via Sharpe validation, transaction costs, and **six variants** —
+A: Robust (long-only), B: Classical (long-only), C: Equal-weight 1/N, D: VN100 buy-&-hold,
+E: Sparse-only (long-short), F: Full equation (long-short) — plus a per-ticker concentration cap
+added after an early run lost 9.47% of capital in one ticker in one month.
 
-See `notebook.ipynb` for the full end-to-end story (data → estimation → algorithm →
-results → verification → OOS backtest → conclusion), and the `.sdd/` folder for the
-design log / report of each phase.
+See `notebook.ipynb` (Vietnamese) / `notebook_en.ipynb` (English) for the full end-to-end story
+(data → estimation → algorithm → results → verification → OOS backtest → conclusion), and
+**`report/main.pdf`** / **`slides/main.pdf`** for the write-up and presentation deck.
+
+## Report & slides
+
+- **Report**: [`report/main.pdf`](report/main.pdf), built from `report/main.tex` with
+  [`tectonic`](https://tectonic-typesetting.github.io/) (`cd report && tectonic main.tex`).
+  Structure: Problem Identification → Problem Modeling → Model Correctness → Algorithm → Data →
+  In-Sample Results → Walk-Forward Backtest → Discussion/Conclusion, plus an appendix with
+  well-commented code listings (`src/estimators.py`, `src/prox_solver.py`, `src/backtest.py`).
+- **Slides**: [`slides/main.pdf`](slides/main.pdf), built the same way from `slides/main.tex`.
+- **Repository**: <https://github.com/nguyentobinh12x5/Optimization-Project>
 
 ## Directory structure
 
@@ -37,13 +53,16 @@ design log / report of each phase.
 │   ├── estimators.py       # Estimates μ̂, Σ, Σ^(1/2) (eigh + clip, custom Ledoit-Wolf)
 │   ├── prox_solver.py      # Custom proximal-subgradient solver (pure numpy)
 │   ├── cvxpy_check.py      # Cross-verification via CVXPY (the ONLY place that imports cvxpy)
-│   ├── backtest.py         # Walk-forward OOS backtest + equal-weight 1/N benchmark
-│   └── viz.py               # 9 plotting functions (fig1..fig9), saved to figures/
+│   ├── backtest.py         # Walk-forward OOS backtest: 6 variants + concentration cap
+│   └── viz.py               # Plotting functions, saved to figures/
 ├── tests/                  # pytest for estimators / prox_solver / cvxpy_check / backtest
-├── data/                   # Cached parquet/csv (returns.parquet, prices.parquet, symbols) — gitignored
-├── figures/                # 9 pre-generated PNGs (fig1_data_overview.png .. fig9_selected_params.png)
-├── notebook.ipynb          # End-to-end deliverable: imports from src/, runs cleanly start to finish
-├── .sdd/                   # Task briefs + reports for each phase (design log)
+├── data/                   # Cached parquet/csv/xlsx (returns, prices, VN30 index, symbols) — gitignored
+├── figures/                # Pre-generated PNGs (in-sample + 6-variant backtest figures)
+├── notebook.ipynb          # End-to-end deliverable (Vietnamese), imports from src/
+├── notebook_en.ipynb       # Same notebook, English
+├── report/                 # LaTeX report (main.tex + sections/ + main.pdf)
+├── slides/                 # LaTeX/Beamer presentation deck (main.tex + main.pdf)
+├── .sdd/                   # Condensed project log (progress.md, final review reports)
 └── .env                    # VNSTOCK_API_KEY (not committed — already in .gitignore)
 ```
 
@@ -55,6 +74,8 @@ design log / report of each phase.
   (`ipykernel`, `nbconvert`, `nbformat`) to build/run the notebook.
 - A `requirements.txt` (pinned to tested versions) is provided at the project root — the
   recommended install method is `pip install -r requirements.txt`.
+- [`tectonic`](https://tectonic-typesetting.github.io/) (optional) to rebuild the report/slides
+  PDFs from source.
 
 ## How to run
 
@@ -86,6 +107,10 @@ python -m ipykernel install --user --name optproj-venv --display-name "Python (O
 #    Re-run the entire notebook from scratch (no need to open the Jupyter UI):
 python -m nbconvert --to notebook --execute notebook.ipynb --output notebook.ipynb
 #    Or open interactively: jupyter notebook notebook.ipynb  (select the "optproj-venv" kernel)
+
+# 6. (Optional) Rebuild the report / slides PDFs from source
+cd report && tectonic main.tex && cd ..
+cd slides && tectonic main.tex && cd ..
 ```
 
 ### Environment notes
@@ -103,60 +128,70 @@ python -m nbconvert --to notebook --execute notebook.ipynb --output notebook.ipy
   find-certificate`), merge it into `certifi`'s CA bundle, then set the
   `REQUESTS_CA_BUNDLE`/`SSL_CERT_FILE` environment variables to point at that merged
   bundle BEFORE running `python -m src.data_loader`. No changes to `src/data_loader.py`
-  are needed (this is machine/network configuration, not application logic). See full
-  details in `.sdd/task-1b-report.md`.
+  are needed (this is machine/network configuration, not application logic).
 
-## `pytest tests/ -v` results (real run, after adding the walk-forward backtest)
+## `pytest tests/ -v` results (real run)
 
 ```
 ============================= test session starts ==============================
 platform darwin -- Python 3.14.5, pytest-9.1.1, pluggy-1.6.0 -- .venv/bin/python
 cachedir: .pytest_cache
 rootdir: /Users/nguyentobinh12gmail.com/Documents/Optimization Project
-collecting ... collected 40 items
+collecting ... collected 51 items
 
-tests/test_backtest.py::test_metrics_constant_return PASSED              [  2%]
-tests/test_backtest.py::test_metrics_known_drawdown_sequence PASSED      [  5%]
-tests/test_backtest.py::test_metrics_sharpe_sign PASSED                  [  7%]
-tests/test_backtest.py::test_build_windows_no_look_ahead PASSED          [ 10%]
-tests/test_backtest.py::test_build_windows_count_matches_lookback PASSED [ 12%]
-tests/test_backtest.py::test_simulate_period_first_period_full_turnover PASSED [ 15%]
-tests/test_backtest.py::test_simulate_period_turnover_against_prev_drifted PASSED [ 17%]
-tests/test_backtest.py::test_walk_forward_backtest_runs_and_is_feasible PASSED [ 20%]
-tests/test_backtest.py::test_equal_weight_backtest_matches_uniform_weights PASSED [ 22%]
-tests/test_cvxpy_check.py::test_cvxpy_solve_feasible_and_matches_objective PASSED [ 25%]
-tests/test_cvxpy_check.py::test_compare_columns_and_small_relgap PASSED  [ 27%]
-tests/test_cvxpy_check.py::test_long_only_matches_cvxpy_on_real_data PASSED [ 30%]
-tests/test_cvxpy_check.py::test_cvxpy_solve_long_only_feasible_and_matches_objective PASSED [ 32%]
-tests/test_data_loader.py::test_weekend_rows_dropped_by_clean_prices PASSED [ 35%]
-tests/test_data_loader.py::test_compute_returns_drops_suspected_holiday_row PASSED [ 37%]
-tests/test_data_loader.py::test_compute_returns_keeps_genuine_flat_day_for_minority PASSED [ 40%]
-tests/test_data_loader.py::test_compute_returns_no_nan_after_filtering PASSED [ 42%]
-tests/test_estimators.py::test_mu_shape_and_value PASSED                 [ 45%]
-tests/test_estimators.py::test_sigma_symmetric PASSED                    [ 47%]
-tests/test_estimators.py::test_sigma_psd PASSED                          [ 50%]
-tests/test_estimators.py::test_sqrt_reconstructs PASSED                  [ 52%]
-tests/test_estimators.py::test_sqrt_symmetric PASSED                     [ 55%]
-tests/test_estimators.py::test_shrinkage_between PASSED                  [ 57%]
-tests/test_estimators.py::test_sqrt_on_psd_singular PASSED               [ 60%]
-tests/test_estimators.py::test_estimate_all_shapes_and_order PASSED      [ 62%]
-tests/test_prox_solver.py::test_closed_form_meanvar PASSED               [ 65%]
-tests/test_prox_solver.py::test_sum_to_one PASSED                        [ 67%]
-tests/test_prox_solver.py::test_sparsity_increases_with_lambda PASSED    [ 70%]
-tests/test_prox_solver.py::test_prox_l1_simplex_eq_exact_zero_and_sum_one PASSED [ 72%]
-tests/test_prox_solver.py::test_prox_l1_simplex_eq_reduces_to_projection_when_t_zero PASSED [ 75%]
-tests/test_prox_solver.py::test_best_obj_monotone PASSED                 [ 77%]
-tests/test_prox_solver.py::test_returns_best_not_last PASSED             [ 80%]
-tests/test_prox_solver.py::test_robust_subgrad_zero_safe PASSED          [ 82%]
-tests/test_prox_solver.py::test_simplex_projection_symmetric_case PASSED [ 85%]
-tests/test_prox_solver.py::test_simplex_projection_dominant_component PASSED [ 87%]
-tests/test_prox_solver.py::test_simplex_projection_already_feasible_is_fixed_point PASSED [ 90%]
-tests/test_prox_solver.py::test_simplex_projection_random_always_feasible PASSED [ 92%]
-tests/test_prox_solver.py::test_solve_long_only_uniform_when_isotropic PASSED [ 95%]
-tests/test_prox_solver.py::test_solve_long_only_feasible_general_case PASSED [ 97%]
+tests/test_backtest.py::test_metrics_constant_return PASSED              [  1%]
+tests/test_backtest.py::test_metrics_known_drawdown_sequence PASSED      [  3%]
+tests/test_backtest.py::test_metrics_sharpe_sign PASSED                  [  5%]
+tests/test_backtest.py::test_metrics_wipeout_does_not_raise_and_floors_annualized_return PASSED [  7%]
+tests/test_backtest.py::test_build_windows_no_look_ahead PASSED          [  9%]
+tests/test_backtest.py::test_build_windows_count_matches_lookback PASSED [ 11%]
+tests/test_backtest.py::test_simulate_period_first_period_full_turnover PASSED [ 13%]
+tests/test_backtest.py::test_simulate_period_turnover_against_prev_drifted PASSED [ 15%]
+tests/test_backtest.py::test_simulate_period_wipeout_caps_return_and_zeros_remaining_days PASSED [ 17%]
+tests/test_backtest.py::test_walk_forward_backtest_runs_and_is_feasible PASSED [ 19%]
+tests/test_backtest.py::test_walk_forward_backtest_max_weight_guarantees_minimum_active_count PASSED [ 21%]
+tests/test_backtest.py::test_walk_forward_backtest_selects_max_return_when_requested PASSED [ 23%]
+tests/test_backtest.py::test_walk_forward_backtest_selects_max_sharpe_by_default PASSED [ 25%]
+tests/test_backtest.py::test_walk_forward_backtest_rejects_invalid_selection_metric PASSED [ 27%]
+tests/test_backtest.py::test_walk_forward_backtest_long_short_runs_and_is_feasible PASSED [ 29%]
+tests/test_backtest.py::test_walk_forward_backtest_long_short_deploys_with_correct_param_order PASSED [ 31%]
+tests/test_backtest.py::test_walk_forward_backtest_long_short_full_runs_and_is_feasible PASSED [ 33%]
+tests/test_backtest.py::test_equal_weight_backtest_matches_uniform_weights PASSED [ 35%]
+tests/test_backtest.py::test_index_buy_and_hold_backtest_aligns_and_applies_fee_once PASSED [ 37%]
+tests/test_backtest.py::test_index_buy_and_hold_backtest_warns_on_missing_dates PASSED [ 39%]
+tests/test_cvxpy_check.py::test_cvxpy_solve_feasible_and_matches_objective PASSED [ 41%]
+tests/test_cvxpy_check.py::test_compare_columns_and_small_relgap PASSED  [ 43%]
+tests/test_cvxpy_check.py::test_long_only_matches_cvxpy_on_real_data PASSED [ 45%]
+tests/test_cvxpy_check.py::test_cvxpy_solve_long_only_feasible_and_matches_objective PASSED [ 47%]
+tests/test_data_loader.py::test_weekend_rows_dropped_by_clean_prices PASSED [ 49%]
+tests/test_data_loader.py::test_compute_returns_drops_suspected_holiday_row PASSED [ 50%]
+tests/test_data_loader.py::test_compute_returns_keeps_genuine_flat_day_for_minority PASSED [ 52%]
+tests/test_data_loader.py::test_compute_returns_no_nan_after_filtering PASSED [ 54%]
+tests/test_estimators.py::test_mu_shape_and_value PASSED                 [ 56%]
+tests/test_estimators.py::test_sigma_symmetric PASSED                    [ 58%]
+tests/test_estimators.py::test_sigma_psd PASSED                          [ 60%]
+tests/test_estimators.py::test_sqrt_reconstructs PASSED                  [ 62%]
+tests/test_estimators.py::test_sqrt_symmetric PASSED                     [ 64%]
+tests/test_estimators.py::test_shrinkage_between PASSED                  [ 66%]
+tests/test_estimators.py::test_sqrt_on_psd_singular PASSED               [ 68%]
+tests/test_estimators.py::test_estimate_all_shapes_and_order PASSED      [ 70%]
+tests/test_prox_solver.py::test_closed_form_meanvar PASSED               [ 72%]
+tests/test_prox_solver.py::test_sum_to_one PASSED                        [ 74%]
+tests/test_prox_solver.py::test_sparsity_increases_with_lambda PASSED    [ 76%]
+tests/test_prox_solver.py::test_prox_l1_simplex_eq_exact_zero_and_sum_one PASSED [ 78%]
+tests/test_prox_solver.py::test_prox_l1_simplex_eq_reduces_to_projection_when_t_zero PASSED [ 80%]
+tests/test_prox_solver.py::test_best_obj_monotone PASSED                 [ 82%]
+tests/test_prox_solver.py::test_returns_best_not_last PASSED             [ 84%]
+tests/test_prox_solver.py::test_robust_subgrad_zero_safe PASSED          [ 86%]
+tests/test_prox_solver.py::test_simplex_projection_symmetric_case PASSED [ 88%]
+tests/test_prox_solver.py::test_simplex_projection_dominant_component PASSED [ 90%]
+tests/test_prox_solver.py::test_simplex_projection_already_feasible_is_fixed_point PASSED [ 92%]
+tests/test_prox_solver.py::test_simplex_projection_random_always_feasible PASSED [ 94%]
+tests/test_prox_solver.py::test_solve_long_only_uniform_when_isotropic PASSED [ 96%]
+tests/test_prox_solver.py::test_solve_long_only_feasible_general_case PASSED [ 98%]
 tests/test_prox_solver.py::test_solve_long_only_returns_best_not_last PASSED [100%]
 
-======================= 40 passed, 27 warnings in 11.99s =======================
+======================= 51 passed, 33 warnings in 8.93s ========================
 ```
 
 The `RuntimeWarning`s (divide-by-zero/overflow/invalid in `matmul`) are known noise from
@@ -166,17 +201,12 @@ affect the passing results (verified that no NaN/Inf leaks into the final output
 
 ## Notebook
 
-`notebook.ipynb` runs cleanly end-to-end via:
+`notebook.ipynb` (and its English twin `notebook_en.ipynb`) runs cleanly end-to-end via:
 
 ```bash
 .venv/bin/python -m nbconvert --to notebook --execute notebook.ipynb --output notebook.ipynb
 ```
 
-Result of the most recent real run: 28 cells (15 code + 13 markdown), **0 errors**, all
-**9 figures** (`fig1`..`fig9`, including 3 new walk-forward backtest figures) regenerated
-directly inside the notebook (calling functions in `src/viz.py`, not reading static PNGs)
-and displayed inline, with a total execution time of ~50 seconds (no network calls — only
-reads the `data/*.parquet` cache; most of this time is the walk-forward backtest re-running
-its grid search of 12 parameter combinations × 25 rebalancing periods). The notebook does
-not copy-paste logic — all computation is imported directly from `src/data_loader`,
-`src/estimators`, `src/prox_solver`, `src/cvxpy_check`, `src/backtest`, `src/viz`.
+The notebook does not copy-paste logic — all computation is imported directly from
+`src/data_loader`, `src/estimators`, `src/prox_solver`, `src/cvxpy_check`, `src/backtest`,
+`src/viz`, reading only the `data/*.parquet` cache (no network calls on a normal run).

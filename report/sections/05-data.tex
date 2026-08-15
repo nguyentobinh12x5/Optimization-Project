@@ -2,30 +2,13 @@
 
 Constituents of the VN100 index were obtained through the \texttt{vnstock} library
 \citep{vnstock}. Of the \textbf{100} listed constituents, $N = 98$ tickers survive cleaning ---
-two are dropped for insufficient trading history within the 4-year window: no price data in the
-first few sessions (listed too late) or more than $10\%$ of sessions missing. The price panel
+two are dropped for insufficient trading history within the 4-year window. The price panel
 spans \textbf{2022-07-26 to 2026-07-24} ($997 \times 98$), and the derived simple-return panel
 spans \textbf{2022-07-27 to 2026-07-24} ($965 \times 98$). All results in this report use that
 return panel.
 
-Two defects in the vendor feed were found and corrected. First, \textbf{phantom weekend
-sessions}: the source occasionally repeated the previous session's close under a Saturday or
-Sunday date. Left in place, these inject spurious zero-return days that pull $\muhat$ toward
-zero and deflate every entry of $\Sig$ --- they corrupt precisely the two inputs the model
-consumes. Second, \textbf{inconsistent intraday timestamps across sources}: the primary and
-fallback endpoints return different times of day for the same trading session, so merging
-several tickers silently doubles the row count and produces a panel riddled with missing
-values that no ticker actually has. Normalizing every timestamp to its calendar date before the
-merge resolves it.
-
-A weekday filter cannot catch Vietnamese public holidays falling on a weekday, on which the
-same repeated-price artifact can appear. Rather than hard-coding a holiday calendar, the loader
-drops any session on which at least $90\%$ of tickers post exactly zero return. On the present
-panel this filter removes no additional rows; it is a guard against future data rather than a
-fix for a current problem, and is reported as such. \Cref{app:data} gives the full diagnostics.
-
 One structural limitation should be stated before any result. The \emph{current} VN100
-membership is applied backward across the full four years, so companies that left the index or
+is applied backward across the full four years, so companies that left the index or
 were delisted during the period are absent. The sample is biased toward survivors, which tends
 to flatter any strategy evaluated on it --- including the benchmark. This is revisited in
 \cref{sec:conclusion}.
